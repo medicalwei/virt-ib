@@ -58,9 +58,8 @@
 BEGIN_C_DECLS
 
 struct vib_mlink{
-	int id;
 	int fd;
-	void *hva;	
+	unsigned long long hva;	
 };
 
 struct vib_mtt{
@@ -729,18 +728,18 @@ struct ibv_context {
 /*
  *
  */
-static inline void *vib_memory_translation(struct ibv_context *context, void *addr)
+static inline unsigned long long vib_memory_translation(struct ibv_context *context, unsigned long long addr)
 {
 	struct vib_mtt *mtt;
         int    offset;
 
         for (mtt = context->mtt; mtt; mtt = mtt->next){
-                offset = mtt->buf - addr;
+                offset = (unsigned long long) mtt->buf - addr;
                 if (offset > -1 && offset < mtt->length)
-                        return (void*) (mtt->hva + offset);
+                        return (unsigned long long) (mtt->hva + offset);
         }
-	printf("Error: cannot buf host virtaul address\n");
-        return NULL;	
+	/* printf("Error: cannot buf host virtaul address\n"); */
+        return 0;	
 }
 
 /**
@@ -1073,7 +1072,7 @@ static inline int ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr,
 
 	for (swr = wr; swr; swr = swr->next){
 		if(swr->send_flags & IBV_SEND_INLINE && swr->num_sge){
-			printf("SEND_INLINE data\n");
+			/* printf("SEND_INLINE data\n"); */
 		}		
 		else{
 			swr->sg_list->addr = vib_memory_translation(qp->context, swr->sg_list->addr);

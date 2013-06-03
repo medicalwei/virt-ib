@@ -48,22 +48,24 @@
 
 #include "ibverbs.h"
 
+#define MEMLINK_DEVICE_PATH "/dev/memlink" 
+
 void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink)
 {
 	struct virtio_memlink_ioctl_input memlink_input;	
-	long unsigned int hva;
+	unsigned long long hva;
 	int fd;
 
 	printf("vib_cmd_reassemble_memory\n");
 	mlock(ptr, size);
-	fd = open(memlink, O_RDWR);
+	fd = open(MEMLINK_DEVICE_PATH, O_RDWR);
         if (fd < 0){ 
                 printf("[vib_cmd_reassemble_memory] memlink open failed\n");
 		return NULL;
      	}
 
 	memlink_input.gva = (long unsigned int) ptr;
-        memlink_input.num_pfns = size/4096;
+        memlink_input.size = size;
         memlink_input.hva = (uintptr_t) &hva;
 
 	if (ioctl(fd, MEMLINK_IOC_CREATE, &memlink_input) < 0) {
@@ -71,23 +73,21 @@ void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink)
                 return NULL;
         }
 	
-	mlink->id  = memlink_input.id;
 	mlink->fd  = fd;	
 	mlink->hva = hva; 
 
-	printf("addr:%p, fd:%d, id:%d, hva:%p\n", ptr, fd, mlink->id, mlink->hva);
+	printf("addr:%p, fd:%d, hva:%p\n", ptr, fd, (void *) mlink->hva);
 	return (void*) hva;
 }
 
 void vib_cmd_return_memory(struct vib_mlink *mlink)
 {
-	if (ioctl(mlink->fd, MEMLINK_IOC_REVOKE, mlink->id) < 0) {
+	if (ioctl(mlink->fd, MEMLINK_IOC_REVOKE, mlink->hva) < 0) {
                 printf("[vib_return_memory] return memory failed\n");
         }	
 	close(mlink->fd);
 	mlink->fd  = -1;
-	mlink->id  = -1;
-	mlink->hva = NULL;
+	mlink->hva = 0;
 }
 
 void *vib_cmd_mmap(int cmd_fd, size_t page_size, int prot, int flag, size_t off)
@@ -130,7 +130,6 @@ void vib_cmd_ring_doorbell(int cmd_fd, void* uar, uint32_t doorbell, int kind)
 {
         struct vib_cmd_hdr hdr;
         struct vib_cmd     cmd;
-        int resp_size = 0;
 
         IBV_INIT_CMD(&cmd, sizeof cmd, RING_DOORBELL);
         VIB_INIT_CMD(hdr, &cmd, sizeof cmd, uar, doorbell, kind);
@@ -419,12 +418,12 @@ int ibv_cmd_reg_mr(struct ibv_pd *pd, void *addr, size_t length,
 
 	return 0;
 }
-void vib_free_mtt(struct ibv_mr *mr, void *addr)
+void vib_free_mtt(struct ibv_mr *mr, unsigned long long addr)
 {
 	struct vib_mtt *mtt = NULL;
 
 	for (mtt = mr->context->mtt; mtt; mtt = mtt->next)
-		if (mtt->hva == addr)
+		if (mtt->hva == (void *) addr)
 			break;
 	if (mtt){
 		if (mtt->prev)

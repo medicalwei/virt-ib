@@ -92,7 +92,7 @@ int ibv_read_sysfs_file(const char *dir, const char *file,
 		return -1;
 	}
 
-	sprintf(buffer, "%s\0", path);
+	sprintf(buffer, "%s", path);
 	len = read(fd, buffer, size);
 
 	close(fd);

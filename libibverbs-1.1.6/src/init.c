@@ -129,6 +129,7 @@ static int vib_find_sysfs_devs(void)
 	return ret;
 }
 
+#if 0
 static int find_sysfs_devs(void)
 {
 	char class_path[IBV_SYSFS_PATH_MAX];
@@ -204,6 +205,7 @@ static int find_sysfs_devs(void)
 	closedir(class_dir);
 	return ret;
 }
+#endif
 
 void ibv_register_driver(const char *name, ibv_driver_init_func init_func)
 {
