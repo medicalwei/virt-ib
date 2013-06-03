@@ -1,0 +1,77 @@
+#ifndef _LINUX_VIRTIO_IB_H
+#define _LINUX_VIRTIO_IB_H
+#include <linux/virtio_ids.h>
+#include <linux/virtio_pci.h>
+#include <linux/virtio.h>
+
+#define VIRTIO_ID_IB 99
+#define DBG 1
+
+enum {
+        IB_USER_VERBS_CMD_GET_CONTEXT,
+        IB_USER_VERBS_CMD_QUERY_DEVICE,
+        IB_USER_VERBS_CMD_QUERY_PORT,
+        IB_USER_VERBS_CMD_ALLOC_PD,
+        IB_USER_VERBS_CMD_DEALLOC_PD,
+        IB_USER_VERBS_CMD_CREATE_AH,
+        IB_USER_VERBS_CMD_MODIFY_AH,
+        IB_USER_VERBS_CMD_QUERY_AH,
+        IB_USER_VERBS_CMD_DESTROY_AH,
+        IB_USER_VERBS_CMD_REG_MR,
+        IB_USER_VERBS_CMD_REG_SMR,
+        IB_USER_VERBS_CMD_REREG_MR,
+        IB_USER_VERBS_CMD_QUERY_MR,
+        IB_USER_VERBS_CMD_DEREG_MR,
+        IB_USER_VERBS_CMD_ALLOC_MW,
+        IB_USER_VERBS_CMD_BIND_MW,
+        IB_USER_VERBS_CMD_DEALLOC_MW,
+        IB_USER_VERBS_CMD_CREATE_COMP_CHANNEL,
+        IB_USER_VERBS_CMD_CREATE_CQ,
+        IB_USER_VERBS_CMD_RESIZE_CQ,
+        IB_USER_VERBS_CMD_DESTROY_CQ,
+        IB_USER_VERBS_CMD_POLL_CQ,
+        IB_USER_VERBS_CMD_PEEK_CQ,
+        IB_USER_VERBS_CMD_REQ_NOTIFY_CQ,
+        IB_USER_VERBS_CMD_CREATE_QP,
+        IB_USER_VERBS_CMD_QUERY_QP,
+        IB_USER_VERBS_CMD_MODIFY_QP,
+        IB_USER_VERBS_CMD_DESTROY_QP,
+        IB_USER_VERBS_CMD_POST_SEND,
+        IB_USER_VERBS_CMD_POST_RECV,
+        IB_USER_VERBS_CMD_ATTACH_MCAST,
+        IB_USER_VERBS_CMD_DETACH_MCAST,
+        IB_USER_VERBS_CMD_CREATE_SRQ,
+        IB_USER_VERBS_CMD_MODIFY_SRQ,
+        IB_USER_VERBS_CMD_QUERY_SRQ,
+        IB_USER_VERBS_CMD_DESTROY_SRQ,
+        IB_USER_VERBS_CMD_POST_SRQ_RECV
+};
+
+enum{
+        IB_USER_VERBS_CMD_FIND_SYSFS = 1000,
+        IB_USER_VERBS_CMD_OPEN_DEV,
+	IB_USER_VERBS_CMD_MMAP,
+	IB_USER_VERBS_CMD_UNMAP,
+        IB_USER_VERBS_CMD_RING_DOORBELL,
+        IB_USER_VERBS_CMD_BUF_COPY,
+        IB_USER_VERBS_CMD_CLOSE_DEV_FD,
+        IB_USER_VERBS_CMD_GET_EVENT
+};
+
+struct vib_cmd_hdr{
+        __u32 fd;
+        __u32 cmd_size;
+        __u32 resp_size;
+        __u64 command;
+        __u64 response;
+};
+
+struct vib_cmd{
+        __u32 command;
+        __u16 in_words;
+        __u16 out_words;
+	__u64 response;
+};	
+
+#endif
+

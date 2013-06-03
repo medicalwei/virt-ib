@@ -1,0 +1,3 @@
+#!/bin/bash
+rm -f /dev/virtib
+rmmod virtio_ib.ko
