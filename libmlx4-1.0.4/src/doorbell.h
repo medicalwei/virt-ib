@@ -45,7 +45,8 @@
 
 static inline void mlx4_write64(uint32_t val[2], struct mlx4_context *ctx, int offset)
 {
-	*(volatile uint64_t *) (ctx->uar + offset) = MLX4_PAIR_TO_64(val);
+//	*(volatile uint64_t *) (ctx->uar + offset) = MLX4_PAIR_TO_64(val);
+	vib_cmd_ring_doorbell(ctx->ibv_ctx.cmd_fd, (ctx->uar + offset), MLX4_PAIR_TO_64(val), 2);
 }
 
 #else
@@ -53,8 +54,12 @@ static inline void mlx4_write64(uint32_t val[2], struct mlx4_context *ctx, int o
 static inline void mlx4_write64(uint32_t val[2], struct mlx4_context *ctx, int offset)
 {
 	pthread_spin_lock(&ctx->uar_lock);
+/*
 	*(volatile uint32_t *) (ctx->uar + offset)     = val[0];
 	*(volatile uint32_t *) (ctx->uar + offset + 4) = val[1];
+*/
+	vib_cmd_ring_doorbell(ctx->ibv_ctx.cmd_fd, (ctx->uar + offset), val[0], 3);
+        vib_cmd_ring_doorbell(ctx->ibv_ctx.cmd_fd, (ctx->uar + offset + 4), val[1], 3);
 	pthread_spin_unlock(&ctx->uar_lock);
 }
 

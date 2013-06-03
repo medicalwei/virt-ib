@@ -81,23 +81,28 @@ int ibv_read_sysfs_file(const char *dir, const char *file,
 	char *path;
 	int fd;
 	int len;
+	char buffer[IBV_SYSFS_PATH_MAX];
 
 	if (asprintf(&path, "%s/%s", dir, file) < 0)
 		return -1;
 
-	fd = open(path, O_RDONLY);
+	fd = open(uverbs0, O_RDONLY);
 	if (fd < 0) {
 		free(path);
 		return -1;
 	}
 
-	len = read(fd, buf, size);
+	sprintf(buffer, "%s\0", path);
+	len = read(fd, buffer, size);
 
 	close(fd);
 	free(path);
 
-	if (len > 0 && buf[len - 1] == '\n')
-		buf[--len] = '\0';
+	if (len > 0 && buffer[len - 1] == '\n')
+		buffer[--len] = '\0';
+
+	memcpy(buf, buffer, size);
+	printf("buf:%s\n", buf);
 
 	return len;
 }

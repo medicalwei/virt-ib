@@ -53,7 +53,22 @@
 #  define __attribute_const
 #endif
 
+#define uverbs0 "/dev/virtib"
+
 BEGIN_C_DECLS
+
+struct vib_mlink{
+	int id;
+	int fd;
+	void *hva;	
+};
+
+struct vib_mtt{
+	struct vib_mtt *prev,*next;
+	void 	       *buf;
+	void 	       *hva;
+	int  	        length;
+};
 
 union ibv_gid {
 	uint8_t			raw[16];
@@ -313,6 +328,7 @@ struct ibv_mr {
 	uint32_t		handle;
 	uint32_t		lkey;
 	uint32_t		rkey;
+	struct vib_mlink	mlink;
 };
 
 enum ibv_mw_type {
@@ -563,6 +579,8 @@ struct ibv_srq {
 	pthread_mutex_t		mutex;
 	pthread_cond_t		cond;
 	uint32_t		events_completed;
+
+	struct vib_mlink	mlink;
 };
 
 struct ibv_qp {
@@ -580,6 +598,8 @@ struct ibv_qp {
 	pthread_mutex_t		mutex;
 	pthread_cond_t		cond;
 	uint32_t		events_completed;
+
+	struct vib_mlink	mlink;
 };
 
 struct ibv_comp_channel {
@@ -599,6 +619,8 @@ struct ibv_cq {
 	pthread_cond_t		cond;
 	uint32_t		comp_events_completed;
 	uint32_t		async_events_completed;
+
+	struct vib_mlink	mlink;
 };
 
 struct ibv_ah {
@@ -700,7 +722,26 @@ struct ibv_context {
 	int			num_comp_vectors;
 	pthread_mutex_t		mutex;
 	void		       *abi_compat;
+	int 			host_fd;
+	struct vib_mtt	       *mtt;
 };
+
+/*
+ *
+ */
+static inline void *vib_memory_translation(struct ibv_context *context, void *addr)
+{
+	struct vib_mtt *mtt;
+        int    offset;
+
+        for (mtt = context->mtt; mtt; mtt = mtt->next){
+                offset = mtt->buf - addr;
+                if (offset > -1 && offset < mtt->length)
+                        return (void*) (mtt->hva + offset);
+        }
+	printf("Error: cannot buf host virtaul address\n");
+        return NULL;	
+}
 
 /**
  * ibv_get_device_list - Get list of IB devices currently available
@@ -976,6 +1017,14 @@ static inline int ibv_post_srq_recv(struct ibv_srq *srq,
 				    struct ibv_recv_wr *recv_wr,
 				    struct ibv_recv_wr **bad_recv_wr)
 {
+	struct ibv_recv_wr *rwr = NULL;
+	
+	for (rwr = recv_wr; rwr; rwr = rwr->next){
+		rwr->sg_list->addr = vib_memory_translation(srq->context, rwr->sg_list->addr);
+		if (!rwr->sg_list->addr)
+			return -1;
+	}
+	
 	return srq->context->ops.post_srq_recv(srq, recv_wr, bad_recv_wr);
 }
 
@@ -1020,6 +1069,19 @@ int ibv_destroy_qp(struct ibv_qp *qp);
 static inline int ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr,
 				struct ibv_send_wr **bad_wr)
 {
+	struct ibv_send_wr *swr = NULL;
+
+	for (swr = wr; swr; swr = swr->next){
+		if(swr->send_flags & IBV_SEND_INLINE && swr->num_sge){
+			printf("SEND_INLINE data\n");
+		}		
+		else{
+			swr->sg_list->addr = vib_memory_translation(qp->context, swr->sg_list->addr);
+			if (!swr->sg_list->addr)
+				return -1;
+		}	
+	}
+
 	return qp->context->ops.post_send(qp, wr, bad_wr);
 }
 
@@ -1029,6 +1091,14 @@ static inline int ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr,
 static inline int ibv_post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr,
 				struct ibv_recv_wr **bad_wr)
 {
+	struct ibv_recv_wr *rwr = NULL;
+	
+	for (rwr = wr; rwr; rwr = rwr->next){
+		rwr->sg_list->addr = vib_memory_translation(qp->context, rwr->sg_list->addr);
+		if (!rwr->sg_list->addr)
+			return -1;
+	}
+	
 	return qp->context->ops.post_recv(qp, wr, bad_wr);
 }
 
@@ -1115,6 +1185,37 @@ const char *ibv_port_state_str(enum ibv_port_state port_state);
  * ibv_event_type_str - Return string describing event_type enum value
  */
 const char *ibv_event_type_str(enum ibv_event_type event);
+
+/*
+ *
+ */
+void *vib_cmd_mmap(int cmd_fd, size_t page_size, int prot, int flag, size_t off);
+
+/**
+ * 
+ */
+void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink);
+
+/*
+ *
+ */
+void vib_cmd_return_memory(struct vib_mlink *mlink);
+
+/*
+ *
+ */
+void vib_cmd_unmap(int cmd_fd, void* addr, size_t size);
+
+/*
+ *
+ */
+void vib_cmd_ring_doorbell(int cmd_fd, void* uar, uint32_t doorbell, int kind);
+
+/*
+ *
+ */
+void vib_cmd_buf_copy(int cmd_fd, void* dst, void* src, unsigned bytecnt);
+
 
 END_C_DECLS
 

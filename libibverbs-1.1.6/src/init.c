@@ -47,6 +47,7 @@
 #include <sys/resource.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #include "ibverbs.h"
 
@@ -76,6 +77,57 @@ struct ibv_driver {
 static struct ibv_sysfs_dev *sysfs_dev_list;
 static struct ibv_driver_name *driver_name_list;
 static struct ibv_driver *head_driver, *tail_driver;
+
+static int vib_find_sysfs_devs(void)
+{
+	struct vib_cmd_hdr hdr;
+	struct vib_cmd cmd;
+	struct ibv_sysfs_dev *sysfs_list;
+	struct ibv_sysfs_dev *sysfs_dev;
+	int ret = 0;
+	int cmd_fd = -1;
+	int i;
+
+	/*Assume there are at most 10 InfiniBand HCA in host*/
+	sysfs_list = malloc(10*sizeof(struct ibv_sysfs_dev));
+
+	for (i = 0; i < 10; i++)
+		sysfs_list[i].have_driver = -1;
+
+	IBV_INIT_CMD_RESP(&cmd, sizeof(cmd), FIND_SYSFS, sysfs_list, 10*sizeof(struct ibv_sysfs_dev));
+	
+	VIB_INIT_CMD(hdr, &cmd, sizeof(cmd), sysfs_list, 10*sizeof(struct ibv_sysfs_dev), -1);
+
+	cmd_fd = open(uverbs0, O_RDWR);
+	if (cmd_fd < 0){
+		printf("open uverbs0 failed\n");
+		free(sysfs_list);
+		return -1;
+	}
+	
+	/*Write to virtib device to get sysfs of host InfiniBand*/
+	ret = write(cmd_fd, &hdr, sizeof(hdr));
+	close(cmd_fd);
+
+	/*After getting results, put the results back to sysfs_dev_list*/
+	if (!ret){
+		for(i = 0; i < 10; i++){
+			if (sysfs_list[i].have_driver > -1){
+				if (!sysfs_dev)
+					sysfs_dev = malloc(sizeof *sysfs_dev);
+				memcpy(sysfs_dev, &sysfs_list[i], sizeof(struct ibv_sysfs_dev));
+                                sysfs_dev->next = sysfs_dev_list;
+                                sysfs_dev_list = sysfs_dev;
+                                sysfs_dev      = NULL;
+			}
+			else
+				break;
+		}
+	}
+
+    	free(sysfs_list);
+	return ret;
+}
 
 static int find_sysfs_devs(void)
 {
@@ -474,7 +526,7 @@ HIDDEN int ibverbs_init(struct ibv_device ***list)
 
 	read_config();
 
-	ret = find_sysfs_devs();
+	ret = vib_find_sysfs_devs();
 	if (ret)
 		return -ret;
 

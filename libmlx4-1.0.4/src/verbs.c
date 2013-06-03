@@ -121,7 +121,6 @@ struct ibv_mr *mlx4_reg_mr(struct ibv_pd *pd, void *addr, size_t length,
 #ifdef IBV_CMD_REG_MR_HAS_RESP_PARAMS
 	{
 		struct ibv_reg_mr_resp resp;
-
 		ret = ibv_cmd_reg_mr(pd, addr, length, (uintptr_t) addr,
 				     access, mr, &cmd, sizeof cmd,
 				     &resp, sizeof resp);
@@ -168,7 +167,7 @@ struct ibv_cq *mlx4_create_cq(struct ibv_context *context, int cqe,
 	struct mlx4_create_cq_resp resp;
 	struct mlx4_cq		  *cq;
 	int			   ret;
-
+	void			  *db = NULL;
 	/* Sanity check CQ size before proceeding */
 	if (cqe > 0x3fffff)
 		return NULL;
@@ -187,6 +186,8 @@ struct ibv_cq *mlx4_create_cq(struct ibv_context *context, int cqe,
 	if (mlx4_alloc_cq_buf(to_mdev(context->device), &cq->buf, cqe))
 		goto err;
 
+	db = vib_search_db_page(to_mctx(context), MLX4_DB_TYPE_CQ);
+
 	cq->set_ci_db  = mlx4_alloc_db(to_mctx(context), MLX4_DB_TYPE_CQ);
 	if (!cq->set_ci_db)
 		goto err_buf;
@@ -196,8 +197,13 @@ struct ibv_cq *mlx4_create_cq(struct ibv_context *context, int cqe,
 	cq->arm_sn     = 1;
 	*cq->set_ci_db = 0;
 
-	cmd.buf_addr = (uintptr_t) cq->buf.buf;
-	cmd.db_addr  = (uintptr_t) cq->set_ci_db;
+	cmd.buf_addr = (uintptr_t) vib_cmd_reassemble_memory(cq->buf.buf, cq->buf.length, &cq->ibv_cq.mlink);
+
+	if (!db){
+		cmd.db_addr  = (uintptr_t) vib_get_db_addr(to_mctx(context), MLX4_DB_TYPE_CQ);
+	}
+	else
+		cmd.db_addr  = (uintptr_t) db; 			   
 
 	ret = ibv_cmd_create_cq(context, cqe - 1, channel, comp_vector,
 				&cq->ibv_cq, &cmd.ibv_cmd, sizeof cmd,
@@ -213,6 +219,7 @@ err_db:
 	mlx4_free_db(to_mctx(context), MLX4_DB_TYPE_CQ, cq->set_ci_db);
 
 err_buf:
+	vib_cmd_return_memory(&cq->ibv_cq.mlink);
 	mlx4_free_buf(&cq->buf);
 
 err:
@@ -227,6 +234,7 @@ int mlx4_resize_cq(struct ibv_cq *ibcq, int cqe)
 	struct mlx4_resize_cq cmd;
 	struct mlx4_buf buf;
 	int old_cqe, outst_cqe, ret;
+	struct vib_mlink mlink;
 
 	/* Sanity check CQ size before proceeding */
 	if (cqe > 0x3fffff)
@@ -252,7 +260,8 @@ int mlx4_resize_cq(struct ibv_cq *ibcq, int cqe)
 		goto out;
 
 	old_cqe = ibcq->cqe;
-	cmd.buf_addr = (uintptr_t) buf.buf;
+	memcpy(&mlink, &ibcq->mlink, sizeof mlink);
+	cmd.buf_addr = (uintptr_t) vib_cmd_reassemble_memory(buf.buf, buf.length, &ibcq->mlink);
 
 #ifdef IBV_CMD_RESIZE_CQ_HAS_RESP_PARAMS
 	{
@@ -264,12 +273,14 @@ int mlx4_resize_cq(struct ibv_cq *ibcq, int cqe)
 	ret = ibv_cmd_resize_cq(ibcq, cqe - 1, &cmd.ibv_cmd, sizeof cmd);
 #endif
 	if (ret) {
+		vib_cmd_return_memory(&ibcq->mlink);
 		mlx4_free_buf(&buf);
 		goto out;
 	}
 
 	mlx4_cq_resize_copy_cqes(cq, buf.buf, old_cqe);
 
+	vib_cmd_return_memory(&mlink);
 	mlx4_free_buf(&cq->buf);
 	cq->buf = buf;
 
@@ -287,6 +298,7 @@ int mlx4_destroy_cq(struct ibv_cq *cq)
 		return ret;
 
 	mlx4_free_db(to_mctx(cq->context), MLX4_DB_TYPE_CQ, to_mcq(cq)->set_ci_db);
+	vib_cmd_return_memory(&cq->mlink);
 	mlx4_free_buf(&to_mcq(cq)->buf);
 	free(to_mcq(cq));
 
@@ -300,6 +312,7 @@ struct ibv_srq *mlx4_create_srq(struct ibv_pd *pd,
 	struct mlx4_create_srq_resp resp;
 	struct mlx4_srq		   *srq;
 	int			    ret;
+	void 			   *db;
 
 	/* Sanity check SRQ size before proceeding */
 	if (attr->attr.max_wr > 1 << 16 || attr->attr.max_sge > 64)
@@ -316,8 +329,11 @@ struct ibv_srq *mlx4_create_srq(struct ibv_pd *pd,
 	srq->max_gs  = attr->attr.max_sge;
 	srq->counter = 0;
 
+
 	if (mlx4_alloc_srq_buf(pd, &attr->attr, srq))
 		goto err;
+
+	db = vib_search_db_page(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
 
 	srq->db = mlx4_alloc_db(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
 	if (!srq->db)
@@ -325,9 +341,16 @@ struct ibv_srq *mlx4_create_srq(struct ibv_pd *pd,
 
 	*srq->db = 0;
 
+	cmd.buf_addr = (uintptr_t) vib_cmd_reassemble_memory(srq->buf.buf, srq->buf.length, &srq->ibv_srq.mlink);
+
+	if (!db)
+		cmd.db_addr = (uintptr_t) vib_get_db_addr(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
+	else
+		cmd.db_addr = (uintptr_t) db;
+/*
 	cmd.buf_addr = (uintptr_t) srq->buf.buf;
 	cmd.db_addr  = (uintptr_t) srq->db;
-
+*/
 	ret = ibv_cmd_create_srq(pd, &srq->ibv_srq, attr,
 				 &cmd.ibv_cmd, sizeof cmd,
 				 &resp.ibv_resp, sizeof resp);
@@ -343,6 +366,7 @@ err_db:
 
 err_free:
 	free(srq->wrid);
+	vib_cmd_return_memory(&srq->ibv_srq.mlink);
 	mlx4_free_buf(&srq->buf);
 
 err:
@@ -377,6 +401,7 @@ int mlx4_destroy_srq(struct ibv_srq *srq)
 		return ret;
 
 	mlx4_free_db(to_mctx(srq->context), MLX4_DB_TYPE_RQ, to_msrq(srq)->db);
+	vib_cmd_return_memory(&srq->mlink);
 	mlx4_free_buf(&to_msrq(srq)->buf);
 	free(to_msrq(srq)->wrid);
 	free(to_msrq(srq));
@@ -390,6 +415,7 @@ struct ibv_qp *mlx4_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *attr)
 	struct ibv_create_qp_resp resp;
 	struct mlx4_qp		 *qp;
 	int			  ret;
+	void			 *db;
 
 	/* Sanity check QP size before proceeding */
 	if (attr->cap.max_send_wr     > 65536 ||
@@ -432,6 +458,7 @@ struct ibv_qp *mlx4_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *attr)
 		goto err_free;
 
 	if (!attr->srq) {
+		db = vib_search_db_page(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
 		qp->db = mlx4_alloc_db(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
 		if (!qp->db)
 			goto err_free;
@@ -439,11 +466,16 @@ struct ibv_qp *mlx4_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *attr)
 		*qp->db = 0;
 	}
 
-	cmd.buf_addr	    = (uintptr_t) qp->buf.buf;
+	cmd.buf_addr = (uintptr_t) vib_cmd_reassemble_memory(qp->buf.buf, qp->buf.length, &qp->ibv_qp.mlink);
 	if (attr->srq)
 		cmd.db_addr = 0;
-	else
-		cmd.db_addr = (uintptr_t) qp->db;
+	else{
+		if (!db)
+			cmd.db_addr = (uintptr_t) vib_get_db_addr(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
+		else
+			cmd.db_addr = (uintptr_t) db;
+	}
+
 	cmd.log_sq_stride   = qp->sq.wqe_shift;
 	for (cmd.log_sq_bb_count = 0;
 	     qp->sq.wqe_cnt > 1 << cmd.log_sq_bb_count;
@@ -488,6 +520,7 @@ err_free:
 	free(qp->sq.wrid);
 	if (qp->rq.wqe_cnt)
 		free(qp->rq.wrid);
+	vib_cmd_return_memory(&qp->ibv_qp.mlink);
 	mlx4_free_buf(&qp->buf);
 
 err:
@@ -616,6 +649,7 @@ int mlx4_destroy_qp(struct ibv_qp *ibqp)
 	free(qp->sq.wrid);
 	if (qp->rq.wqe_cnt)
 		free(qp->rq.wrid);
+	vib_cmd_return_memory(&ibqp->mlink);
 	mlx4_free_buf(&qp->buf);
 	free(qp);
 

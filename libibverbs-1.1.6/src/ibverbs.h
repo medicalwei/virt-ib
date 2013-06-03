@@ -37,6 +37,7 @@
 #include <pthread.h>
 
 #include <infiniband/driver.h>
+#include "virtio_memlink.h"
 
 #ifdef HAVE_VALGRIND_MEMCHECK_H
 
@@ -102,4 +103,12 @@ HIDDEN int ibverbs_init(struct ibv_device ***list);
 		(cmd)->response  = (uintptr_t) (out);			\
 	} while (0)
 
+#define VIB_INIT_CMD(cmd, in, insize, out, outsize, cmd_fd)			\
+	do{								\
+		(cmd).fd = (cmd_fd);					\
+		(cmd).cmd_size  = (insize);				\
+		(cmd).resp_size = (outsize);				\
+		(cmd).command   = (uintptr_t) (in);			\
+		(cmd).response  = (uintptr_t) (out);	 		\
+	}while(0)
 #endif /* IB_VERBS_H */

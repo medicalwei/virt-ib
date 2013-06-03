@@ -47,6 +47,7 @@ struct mlx4_db_page {
 	int				num_db;
 	int				use_cnt;
 	unsigned long			free[0];
+	struct vib_mlink		mlink;
 };
 
 static const int db_size[] = {
@@ -61,6 +62,7 @@ static struct mlx4_db_page *__add_page(struct mlx4_context *context,
 	int ps = to_mdev(context->ibv_ctx.device)->page_size;
 	int pp;
 	int i;
+	struct vib_mlink mlink;
 
 	pp = ps / db_size[type];
 
@@ -72,6 +74,7 @@ static struct mlx4_db_page *__add_page(struct mlx4_context *context,
 		free(page);
 		return NULL;
 	}
+	vib_cmd_reassemble_memory(page->buf.buf, page->buf.length, &mlink);
 
 	page->num_db  = pp;
 	page->use_cnt = 0;
@@ -84,6 +87,7 @@ static struct mlx4_db_page *__add_page(struct mlx4_context *context,
 	if (page->next)
 		page->next->prev = page;
 
+	memcpy(&page->mlink, &mlink, sizeof(mlink));
 	return page;
 }
 
@@ -112,7 +116,7 @@ found:
 	j = ffsl(page->free[i]);
 	page->free[i] &= ~(1UL << (j - 1));
 	db = page->buf.buf + (i * 8 * sizeof (long) + (j - 1)) * db_size[type];
-
+	page->mlink.hva += (i * 8 * sizeof (long) + (j - 1)) * db_size[type];
 out:
 	pthread_mutex_unlock(&context->db_list_mutex);
 
@@ -144,11 +148,41 @@ void mlx4_free_db(struct mlx4_context *context, enum mlx4_db_type type, uint32_t
 			context->db_list[type] = page->next;
 		if (page->next)
 			page->next->prev = page->prev;
-
+		
+		vib_cmd_return_memory(&page->mlink);
 		mlx4_free_buf(&page->buf);
 		free(page);
 	}
 
 out:
 	pthread_mutex_unlock(&context->db_list_mutex);
+}
+
+void *vib_search_db_page(struct mlx4_context *context, enum mlx4_db_type type)
+{
+	struct mlx4_db_page *page;
+	uint32_t *db = NULL;
+	int i,j;
+
+	pthread_mutex_lock(&context->db_list_mutex);
+
+	for (page = context->db_list[type]; page; page = page->next){
+                if (page->use_cnt < page->num_db){
+			for (i = 0; !page->free[i]; ++i)
+
+			j = ffsl(page->free[i]);
+        		page->free[i] &= ~(1UL << (j - 1));
+        		db = context->db_list[type]->mlink.hva + (i * 8 * sizeof (long) + (j - 1)) * db_size[type];
+			break;
+		}
+	}
+
+	pthread_mutex_unlock(&context->db_list_mutex);
+	return db;
+	
+}
+
+void *vib_get_db_addr(struct mlx4_context *context, enum mlx4_db_type type)
+{
+	return context->db_list[type]->mlink.hva;	
 }
