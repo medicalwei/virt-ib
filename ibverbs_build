@@ -1,0 +1,16 @@
+#!/bin/bash
+
+rm ~/rpmbuild/RPMS/x86_64/libibverbs-*
+
+tar zcvf libibverbs-1.1.6.tar.gz libibverbs-1.1.6/*
+mv libibverbs-1.1.6.tar.gz /root/rpmbuild/SOURCES/
+cd ~/rpmbuild/SPECS/
+
+rpmbuild -bb libibverbs.spec
+
+service openibd stop
+
+rpm -Uvh --force ~/rpmbuild/RPMS/x86_64/libibverbs-*.rpm
+
+service openibd restart
+

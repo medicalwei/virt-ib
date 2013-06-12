@@ -1,5 +1,0 @@
-#!/bin/bash
-insmod virtio_ib.ko
-dev_num=$(cat /proc/devices | grep virtib | cut -c 1-3)
-mknod /dev/virtib c $dev_num 0
-
