@@ -11,5 +11,6 @@ clean:
 run: all
 	-rm /dev/memlink
 	-rmmod virtio_memlink
+	
 	insmod virtio_memlink.ko
-	mknod /dev/memlink c 248 0
+	mknod /dev/memlink c `cat /proc/devices | grep memlink | cut -d' ' -f 1` 0
