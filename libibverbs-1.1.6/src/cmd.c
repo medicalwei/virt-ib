@@ -53,7 +53,6 @@
 void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink)
 {
 	struct virtio_memlink_ioctl_input memlink_input;	
-	unsigned long long hva;
 	int fd;
 
 	printf("vib_cmd_reassemble_memory\n");
@@ -66,7 +65,6 @@ void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink)
 
 	memlink_input.gva = (long unsigned int) ptr;
         memlink_input.size = size;
-        memlink_input.hva = (uintptr_t) &hva;
 
 	if (ioctl(fd, MEMLINK_IOC_CREATE, &memlink_input) < 0) {
                 printf("[vib_cmd_reassemble_memory] send ptr failed\n");
@@ -74,10 +72,10 @@ void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink)
         }
 	
 	mlink->fd  = fd;	
-	mlink->hva = hva; 
+	mlink->hva = memlink_input.hva; 
 
 	printf("addr:%p, fd:%d, hva:%p\n", ptr, fd, (void *) mlink->hva);
-	return (void*) hva;
+	return (void*) mlink->hva;
 }
 
 void vib_cmd_return_memory(struct vib_mlink *mlink)
