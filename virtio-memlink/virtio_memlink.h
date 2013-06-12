@@ -12,7 +12,7 @@
 struct virtio_memlink_ioctl_input
 {
 	int size;
-	long unsigned int gva;
+	unsigned long long gva;
 	unsigned long long hva; /* will be given by module */
 };
 
