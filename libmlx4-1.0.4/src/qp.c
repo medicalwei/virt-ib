@@ -676,6 +676,10 @@ struct mlx4_qp *mlx4_find_qp(struct mlx4_context *ctx, uint32_t qpn)
 int mlx4_store_qp(struct mlx4_context *ctx, uint32_t qpn, struct mlx4_qp *qp)
 {
 	int tind = (qpn & (ctx->num_qps - 1)) >> ctx->qp_table_shift;
+	printf("qpn %d, num_qps %d, tind %d\n", qpn, ctx->num_qps, tind);
+	printf("qp_table %p\n", ctx->qp_table);
+	printf("qp_table[%d] %p\n", tind, ctx->qp_table[tind]);
+	printf("qp_table[%d].table %p\n", tind, ctx->qp_table[tind].table);
 
 	if (!ctx->qp_table[tind].refcnt) {
 		ctx->qp_table[tind].table = calloc(ctx->qp_table_mask + 1,

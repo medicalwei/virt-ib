@@ -517,6 +517,7 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf, size_t co
 		case IB_USER_VERBS_CMD_QUERY_SRQ:
 		case IB_USER_VERBS_CMD_DESTROY_SRQ:
 		case IB_USER_VERBS_CMD_GET_EVENT:
+		case IB_USER_VERBS_CMD_REG_MR:
 			return virtib_cmd_with_resp(hdr, vib->write_vq);
 		case IB_USER_VERBS_CMD_FIND_SYSFS:
 			return virtib_device(&cmd, vib->device_vq);
@@ -540,17 +541,12 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf, size_t co
 			return virtib_buf_copy(hdr, vib->device_vq);
 		case IB_USER_VERBS_CMD_CLOSE_DEV_FD:
 			return virtib_close_dev_fd(hdr, vib->device_vq);
-		case IB_USER_VERBS_CMD_REG_MR:
-			return -1;
-			break;
 		case 3000:
 			printk(KERN_INFO "addr:%p\n", cmd.response);
 			return virtib_device(&cmd, vib->write_vq);
-			break;
 		default:
-			ret = -1;
 			printk(KERN_ERR "VIB: no such command\n");
-			break;
+			return -1;
 	}
 
 	return ret;

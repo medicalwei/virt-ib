@@ -448,20 +448,26 @@ struct ibv_qp *mlx4_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *attr)
 			attr->cap.max_recv_wr = 1;
 	}
 
-	if (mlx4_alloc_qp_buf(pd, &attr->cap, attr->qp_type, qp))
+	if (mlx4_alloc_qp_buf(pd, &attr->cap, attr->qp_type, qp)) {
+		printf("error during mlx4_alloc_qp_buf\n");
 		goto err;
+	}
 
 	mlx4_init_qp_indices(qp);
 
 	if (pthread_spin_init(&qp->sq.lock, PTHREAD_PROCESS_PRIVATE) ||
-	    pthread_spin_init(&qp->rq.lock, PTHREAD_PROCESS_PRIVATE))
+	    pthread_spin_init(&qp->rq.lock, PTHREAD_PROCESS_PRIVATE)){
+		printf("error during pthread_spin_init\n");
 		goto err_free;
+	}
 
 	if (!attr->srq) {
 		db = vib_search_db_page(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
 		qp->db = mlx4_alloc_db(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
-		if (!qp->db)
+		if (!qp->db) {
+			printf("error during mlx4_alloc_db\n");
 			goto err_free;
+		}
 
 		*qp->db = 0;
 	}
@@ -488,12 +494,16 @@ struct ibv_qp *mlx4_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *attr)
 
 	ret = ibv_cmd_create_qp(pd, &qp->ibv_qp, attr, &cmd.ibv_cmd, sizeof cmd,
 				&resp, sizeof resp);
-	if (ret)
+	if (ret) {
+		printf("Error during creating qp\n");
 		goto err_rq_db;
+	}
 
 	ret = mlx4_store_qp(to_mctx(pd->context), qp->ibv_qp.qp_num, qp);
-	if (ret)
+	if (ret) {
+		printf("Error during storing qp\n");
 		goto err_destroy;
+	}
 	pthread_mutex_unlock(&to_mctx(pd->context)->qp_table_mutex);
 
 	qp->rq.wqe_cnt = qp->rq.max_post = attr->cap.max_recv_wr;
