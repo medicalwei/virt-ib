@@ -336,7 +336,7 @@ static int dev_ioctl(struct inode *inode, struct file *filp,
 				return -EFAULT;
 			}
 
-			create(vml_global, &input);
+			ret = create(vml_global, &input);
 			if (ret < 0){
 				printk(KERN_ERR "%s: memlink failed to create.\n", __FUNCTION__);
 			} else {

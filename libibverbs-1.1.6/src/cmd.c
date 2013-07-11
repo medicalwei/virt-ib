@@ -1011,7 +1011,8 @@ int ibv_cmd_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr,
 
 	cmd->reserved[0] = cmd->reserved[1] = 0;
 
-	if (write(qp->context->cmd_fd, cmd, cmd_size) != cmd_size)
+
+	if (write(qp->context->cmd_fd, &hdr, sizeof hdr) != cmd_size) 
 		return errno;
 
 	return 0;
