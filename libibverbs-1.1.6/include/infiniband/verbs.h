@@ -738,8 +738,8 @@ static inline unsigned long long vib_memory_translation(struct ibv_context *cont
                 if (offset > -1 && offset < mtt->length)
                         return (unsigned long long) (mtt->hva + offset);
         }
-	/* printf("Error: cannot buf host virtaul address\n"); */
-        return 0;	
+	/* printf("Cannot buf host virtaul address at %lx. Returning the addr instead.\n", addr); */
+	return addr;
 }
 
 /**

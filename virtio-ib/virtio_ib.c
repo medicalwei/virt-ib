@@ -525,13 +525,13 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf, size_t co
 		case IB_USER_VERBS_CMD_DESTROY_AH:
 		case IB_USER_VERBS_CMD_DEREG_MR:
 		case IB_USER_VERBS_CMD_REQ_NOTIFY_CQ:
+		case IB_USER_VERBS_CMD_MODIFY_QP:
 		case IB_USER_VERBS_CMD_ATTACH_MCAST:
 		case IB_USER_VERBS_CMD_DETACH_MCAST:
 		case IB_USER_VERBS_CMD_MODIFY_SRQ:
+			return virtib_cmd(hdr, vib->write_vq);
 		case IB_USER_VERBS_CMD_OPEN_DEV:
 			return virtib_cmd(hdr, vib->device_vq);
-		case IB_USER_VERBS_CMD_MODIFY_QP:
-			return virtib_cmd(hdr, vib->write_vq);
 		case IB_USER_VERBS_CMD_MMAP:
 			return virtib_mmap(hdr, vib->write_vq);
 		case IB_USER_VERBS_CMD_UNMAP:
