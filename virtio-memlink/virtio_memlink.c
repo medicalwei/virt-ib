@@ -10,6 +10,7 @@
 #include <asm/uaccess.h>
 
 #define DEBUG 1
+#define PFNS_PER_PAGE (PAGE_SIZE/sizeof(ml->pfns[0]))
 
 static int dev_major;
 static int dev_minor;
@@ -92,10 +93,13 @@ void memlink_free(struct memlink *ml){
 
 static int create(struct virtio_memlink *vml, struct virtio_memlink_ioctl_input *input)
 {
-	struct scatterlist sg[4];
+	struct scatterlist *sg;
 	struct virtqueue *vq = vml->create_vq;
-	int err, i;
+	int ret, i;
 	struct memlink *ml = kmalloc(sizeof(struct memlink), GFP_KERNEL);
+
+	uint32_t outsg_count, pfns_size, page_count;
+	void *pfns_ptr;
 
 	ml->size = input->size;
 	ml->offset = input->gva & (PAGE_SIZE-1);
@@ -114,6 +118,7 @@ static int create(struct virtio_memlink *vml, struct virtio_memlink_ioctl_input 
 	ml->pfns = kmalloc(sizeof(uint32_t)* ml->num_pfns, GFP_KERNEL);
 
 	if (ml->pfns == NULL) {
+		printk(KERN_ERR "virtmemlink: failed to allocate memory for pfns\n");
 		kfree(ml);
 		return -ENOMEM;
 	}
@@ -121,17 +126,19 @@ static int create(struct virtio_memlink *vml, struct virtio_memlink_ioctl_input 
 	ml->pages = kmalloc(sizeof(*ml->pages) * ml->num_pfns, GFP_KERNEL);
 
 	if (ml->pages == NULL) {
+		printk(KERN_ERR "virtmemlink: failed to allocate memory for pages\n");
 		kfree(ml->pages);
 		kfree(ml);
 		return -ENOMEM;
 	}
 
 	down_write(&current->mm->mmap_sem);
-	err = get_user_pages_fast(input->gva & ~(PAGE_SIZE-1) ,
+	ret = get_user_pages_fast(input->gva & ~(PAGE_SIZE-1) ,
 			ml->num_pfns, 1, ml->pages);
 	up_write(&current->mm->mmap_sem);
 
-	if (err <= 0) {
+	if (ret != ml->num_pfns) {
+		printk(KERN_ERR "virtmemlink: failed to pin pages\n");
 		kfree(ml->pages);
 		kfree(ml->pfns);
 		kfree(ml);
@@ -142,15 +149,36 @@ static int create(struct virtio_memlink *vml, struct virtio_memlink_ioctl_input 
 		ml->pfns[i] = page_to_pfn(ml->pages[i]);
 	}
 
-	sg_init_one(&sg[0], &ml->size, sizeof(ml->size));
-	sg_init_one(&sg[1], &ml->offset, sizeof(ml->offset));
-	sg_init_one(&sg[2], ml->pfns,
-			sizeof(ml->pfns[0]) * ml->num_pfns);
-	sg_init_one(&sg[3], &ml->hva, sizeof(input->hva));
+	/* calculate segment size first */
+	outsg_count = 0;
+	pfns_size = sizeof(ml->pfns[0])*ml->num_pfns;
+	page_count = pfns_size/PAGE_SIZE
+			+ ((pfns_size%PAGE_SIZE == 0) ? 0 : 1);
+	pfns_ptr = (void *) ml->pfns;
+
+	sg = kmalloc(sizeof(struct scatterlist)*(2 + page_count + 1),
+			GFP_KERNEL);
+
+	sg_init_one(&sg[outsg_count++], &ml->size, sizeof(ml->size));
+	sg_init_one(&sg[outsg_count++], &ml->offset, sizeof(ml->offset));
+
+	while(1){
+		sg_init_one(&sg[outsg_count++], pfns_ptr,
+				pfns_size > PAGE_SIZE ? PAGE_SIZE : pfns_size);
+
+		if (pfns_size <= PAGE_SIZE) {
+			break;
+		}
+
+		pfns_ptr += PAGE_SIZE;
+		pfns_size -= PAGE_SIZE;
+	}
+
+	sg_init_one(&sg[outsg_count], &ml->hva, sizeof(input->hva));
 
 	init_completion(&vml->create_acked);
 
-	BUG_ON(virtqueue_add_buf(vq, sg, 3, 1, vml) < 0);
+	BUG_ON(virtqueue_add_buf(vq, sg, outsg_count, 1, vml) < 0);
 
 	virtqueue_kick(vq);
 
@@ -198,7 +226,6 @@ static int revoke(struct virtio_memlink *vml, uint64_t hva)
 
 	virtqueue_kick(vq);
 	wait_for_completion(&vml->revoke_acked);
-
 
 	memlink_free(ml);
 	if (ml->pprev != NULL){
