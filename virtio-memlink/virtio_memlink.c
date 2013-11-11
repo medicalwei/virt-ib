@@ -42,9 +42,6 @@ struct virtio_memlink
 	struct completion revoke_acked;
 };
 
-#define MEMLINK_STATUS_UNUSED 0
-#define MEMLINK_STATUS_USED 1
-
 static struct virtio_memlink *vml_global;
 
 static struct virtio_device_id id_table[] = {

@@ -93,16 +93,15 @@ int ibv_read_sysfs_file(const char *dir, const char *file,
 	}
 
 	sprintf(buffer, "%s", path);
+
 	len = read(fd, buffer, size);
 
 	close(fd);
 	free(path);
 
-	if (len > 0 && buffer[len - 1] == '\n')
-		buffer[--len] = '\0';
+	buffer[len] = '\0';
 
 	memcpy(buf, buffer, size);
-	printf("buf:%s\n", buf);
 
 	return len;
 }
