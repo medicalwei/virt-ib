@@ -3,12 +3,13 @@
 rm ~/rpmbuild/RPMS/x86_64/libmlx4-*
 
 tar zcvf libmlx4-1.0.4.tar.gz libmlx4-1.0.4/*
+cp libmlx4-1.0.4/libmlx4.spec ~/rpmbuild/SPECS/
 mv libmlx4-1.0.4.tar.gz ~/rpmbuild/SOURCES/
 cd ~/rpmbuild/SPECS/ 
 
 rpmbuild -bb libmlx4.spec 
 
-service openibd stop
+service opensmd stop
 
 rpm -Uvh --force ~/rpmbuild/RPMS/x86_64/libmlx4-*.rpm
 
