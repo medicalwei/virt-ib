@@ -55,7 +55,6 @@ static void memlink_create_ack(struct virtqueue *vq)
 
 	vml = virtqueue_get_buf(vq, &len);
 	if (vml) {
-
 		complete(&vml->create_acked);
 	}
 }
