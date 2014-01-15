@@ -30,64 +30,41 @@
  * SOFTWARE.
  */
 
-#ifndef MLX4_ABI_H
-#define MLX4_ABI_H
+#ifndef DOORBELL_H
+#define DOORBELL_H
 
-#include <infiniband/kern-abi.h>
+#if SIZEOF_LONG == 8
 
-#define MLX4_UVERBS_MIN_ABI_VERSION	2
-#define MLX4_UVERBS_MAX_ABI_VERSION	3
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+#  define MLX4_PAIR_TO_64(val) ((uint64_t) val[1] << 32 | val[0])
+#elif __BYTE_ORDER == __BIG_ENDIAN
+#  define MLX4_PAIR_TO_64(val) ((uint64_t) val[0] << 32 | val[1])
+#else
+#  error __BYTE_ORDER not defined
+#endif
 
-struct mlx4_alloc_ucontext_resp {
-	struct ibv_get_context_resp	ibv_resp;
-	__u32				qp_tab_size;
-	__u16				bf_reg_size;
-	__u16				bf_regs_per_page;
-};
+static inline void mlx4_write64(uint32_t val[2], struct mlx4_context *ctx, int offset)
+{
+	/*
+	*(volatile uint64_t *) (ctx->uar + offset) = MLX4_PAIR_TO_64(val);
+	*/
+	vib_cmd_ring_doorbell(ctx->ibv_ctx.cmd_fd, (ctx->uar + offset), MLX4_PAIR_TO_64(val), 2);
+}
 
-struct mlx4_alloc_pd_resp {
-	struct ibv_alloc_pd_resp	ibv_resp;
-	__u32				pdn;
-	__u32				reserved;
-};
+#else
 
-struct mlx4_create_cq {
-	struct ibv_create_cq		ibv_cmd;
-	__u64				buf_addr;
-	__u64				db_addr;
-};
+static inline void mlx4_write64(uint32_t val[2], struct mlx4_context *ctx, int offset)
+{
+	pthread_spin_lock(&ctx->uar_lock);
+	/*
+	*(volatile uint32_t *) (ctx->uar + offset)     = val[0];
+	*(volatile uint32_t *) (ctx->uar + offset + 4) = val[1];
+	*/
+	vib_cmd_ring_doorbell(ctx->ibv_ctx.cmd_fd, (ctx->uar + offset), val[0], 3);
+	vib_cmd_ring_doorbell(ctx->ibv_ctx.cmd_fd, (ctx->uar + offset + 4), val[1], 3);
+	pthread_spin_unlock(&ctx->uar_lock);
+}
 
-struct mlx4_create_cq_resp {
-	struct ibv_create_cq_resp	ibv_resp;
-	__u32				cqn;
-	__u32				reserved;
-};
+#endif
 
-struct mlx4_resize_cq {
-	struct ibv_resize_cq		ibv_cmd;
-	__u64				buf_addr;
-};
-
-struct mlx4_create_srq {
-	struct ibv_create_srq		ibv_cmd;
-	__u64				buf_addr;
-	__u64				db_addr;
-};
-
-struct mlx4_create_srq_resp {
-	struct ibv_create_srq_resp	ibv_resp;
-	__u32				srqn;
-	__u32				reserved;
-};
-
-struct mlx4_create_qp {
-	struct ibv_create_qp		ibv_cmd;
-	__u64				buf_addr;
-	__u64				db_addr;
-	__u8				log_sq_bb_count;
-	__u8				log_sq_stride;
-	__u8				sq_no_prefetch;	/* was reserved in ABI 2 */
-	__u8				reserved[5];
-};
-
-#endif /* MLX4_ABI_H */
+#endif /* DOORBELL_H */

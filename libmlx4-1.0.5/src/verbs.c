@@ -121,6 +121,7 @@ struct ibv_mr *mlx4_reg_mr(struct ibv_pd *pd, void *addr, size_t length,
 #ifdef IBV_CMD_REG_MR_HAS_RESP_PARAMS
 	{
 		struct ibv_reg_mr_resp resp;
+
 		ret = ibv_cmd_reg_mr(pd, addr, length, (uintptr_t) addr,
 				     access, mr, &cmd, sizeof cmd,
 				     &resp, sizeof resp);
@@ -167,7 +168,9 @@ struct ibv_cq *mlx4_create_cq(struct ibv_context *context, int cqe,
 	struct mlx4_create_cq_resp resp;
 	struct mlx4_cq		  *cq;
 	int			   ret;
+	struct mlx4_context       *mctx = to_mctx(context);
 	void			  *db = NULL;
+
 	/* Sanity check CQ size before proceeding */
 	if (cqe > 0x3fffff)
 		return NULL;
@@ -183,11 +186,10 @@ struct ibv_cq *mlx4_create_cq(struct ibv_context *context, int cqe,
 
 	cqe = align_queue_size(cqe + 1);
 
-	if (mlx4_alloc_cq_buf(to_mdev(context->device), &cq->buf, cqe))
+	if (mlx4_alloc_cq_buf(to_mdev(context->device), &cq->buf, cqe, mctx->cqe_size))
 		goto err;
 
-	db = vib_search_db_page(to_mctx(context), MLX4_DB_TYPE_CQ);
-
+	cq->cqe_size = mctx->cqe_size;
 	cq->set_ci_db  = mlx4_alloc_db(to_mctx(context), MLX4_DB_TYPE_CQ);
 	if (!cq->set_ci_db)
 		goto err_buf;
@@ -197,13 +199,11 @@ struct ibv_cq *mlx4_create_cq(struct ibv_context *context, int cqe,
 	cq->arm_sn     = 1;
 	*cq->set_ci_db = 0;
 
-	cmd.buf_addr = (uintptr_t) vib_cmd_reassemble_memory(cq->buf.buf, cq->buf.length, &cq->ibv_cq.mlink);
+	db = vib_search_db_page(to_mctx(context), MLX4_DB_TYPE_CQ) ||
+			vib_get_db_addr(to_mctx(context), MLX4_DB_TYPE_CQ);
 
-	if (!db){
-		cmd.db_addr  = (uintptr_t) vib_get_db_addr(to_mctx(context), MLX4_DB_TYPE_CQ);
-	}
-	else
-		cmd.db_addr  = (uintptr_t) db; 			   
+	cmd.buf_addr = (uintptr_t) vib_cmd_reassemble_memory(cq->buf.buf, cq->buf.length, &cq->ibv_cq.mlink);
+	cmd.db_addr  = (uintptr_t) db;
 
 	ret = ibv_cmd_create_cq(context, cqe - 1, channel, comp_vector,
 				&cq->ibv_cq, &cmd.ibv_cmd, sizeof cmd,
@@ -255,7 +255,7 @@ int mlx4_resize_cq(struct ibv_cq *ibcq, int cqe)
 		goto out;
 	}
 
-	ret = mlx4_alloc_cq_buf(to_mdev(ibcq->context->device), &buf, cqe);
+	ret = mlx4_alloc_cq_buf(to_mdev(ibcq->context->device), &buf, cqe, cq->cqe_size);
 	if (ret)
 		goto out;
 
@@ -298,7 +298,6 @@ int mlx4_destroy_cq(struct ibv_cq *cq)
 		return ret;
 
 	mlx4_free_db(to_mctx(cq->context), MLX4_DB_TYPE_CQ, to_mcq(cq)->set_ci_db);
-	vib_cmd_return_memory(&cq->mlink);
 	mlx4_free_buf(&to_mcq(cq)->buf);
 	free(to_mcq(cq));
 
@@ -329,11 +328,8 @@ struct ibv_srq *mlx4_create_srq(struct ibv_pd *pd,
 	srq->max_gs  = attr->attr.max_sge;
 	srq->counter = 0;
 
-
 	if (mlx4_alloc_srq_buf(pd, &attr->attr, srq))
 		goto err;
-
-	db = vib_search_db_page(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
 
 	srq->db = mlx4_alloc_db(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
 	if (!srq->db)
@@ -341,16 +337,12 @@ struct ibv_srq *mlx4_create_srq(struct ibv_pd *pd,
 
 	*srq->db = 0;
 
-	cmd.buf_addr = (uintptr_t) vib_cmd_reassemble_memory(srq->buf.buf, srq->buf.length, &srq->ibv_srq.mlink);
+	db = vib_search_db_page(to_mctx(pd->context), MLX4_DB_TYPE_RQ)
+				|| vib_get_db_addr(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
 
-	if (!db)
-		cmd.db_addr = (uintptr_t) vib_get_db_addr(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
-	else
-		cmd.db_addr = (uintptr_t) db;
-/*
-	cmd.buf_addr = (uintptr_t) srq->buf.buf;
-	cmd.db_addr  = (uintptr_t) srq->db;
-*/
+	cmd.buf_addr = (uintptr_t) vib_cmd_reassemble_memory(srq->buf.buf, srq->buf.length, &srq->ibv_srq.mlink);
+	cmd.db_addr = (uintptr_t) db;
+
 	ret = ibv_cmd_create_srq(pd, &srq->ibv_srq, attr,
 				 &cmd.ibv_cmd, sizeof cmd,
 				 &resp.ibv_resp, sizeof resp);
@@ -448,26 +440,21 @@ struct ibv_qp *mlx4_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *attr)
 			attr->cap.max_recv_wr = 1;
 	}
 
-	if (mlx4_alloc_qp_buf(pd, &attr->cap, attr->qp_type, qp)) {
-		printf("error during mlx4_alloc_qp_buf\n");
+	if (mlx4_alloc_qp_buf(pd, &attr->cap, attr->qp_type, qp))
 		goto err;
-	}
 
 	mlx4_init_qp_indices(qp);
 
 	if (pthread_spin_init(&qp->sq.lock, PTHREAD_PROCESS_PRIVATE) ||
-	    pthread_spin_init(&qp->rq.lock, PTHREAD_PROCESS_PRIVATE)){
-		printf("error during pthread_spin_init\n");
+	    pthread_spin_init(&qp->rq.lock, PTHREAD_PROCESS_PRIVATE))
 		goto err_free;
-	}
 
 	if (!attr->srq) {
-		db = vib_search_db_page(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
+		db = vib_search_db_page(to_mctx(pd->context), MLX4_DB_TYPE_RQ) ||
+			vib_get_db_addr(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
 		qp->db = mlx4_alloc_db(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
-		if (!qp->db) {
-			printf("error during mlx4_alloc_db\n");
+		if (!qp->db)
 			goto err_free;
-		}
 
 		*qp->db = 0;
 	}
@@ -475,13 +462,8 @@ struct ibv_qp *mlx4_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *attr)
 	cmd.buf_addr = (uintptr_t) vib_cmd_reassemble_memory(qp->buf.buf, qp->buf.length, &qp->ibv_qp.mlink);
 	if (attr->srq)
 		cmd.db_addr = 0;
-	else{
-		if (!db)
-			cmd.db_addr = (uintptr_t) vib_get_db_addr(to_mctx(pd->context), MLX4_DB_TYPE_RQ);
-		else
-			cmd.db_addr = (uintptr_t) db;
-	}
-
+	else
+		cmd.db_addr = (uintptr_t) db;
 	cmd.log_sq_stride   = qp->sq.wqe_shift;
 	for (cmd.log_sq_bb_count = 0;
 	     qp->sq.wqe_cnt > 1 << cmd.log_sq_bb_count;
@@ -494,16 +476,12 @@ struct ibv_qp *mlx4_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *attr)
 
 	ret = ibv_cmd_create_qp(pd, &qp->ibv_qp, attr, &cmd.ibv_cmd, sizeof cmd,
 				&resp, sizeof resp);
-	if (ret) {
-		printf("Error during creating qp\n");
+	if (ret)
 		goto err_rq_db;
-	}
 
 	ret = mlx4_store_qp(to_mctx(pd->context), qp->ibv_qp.qp_num, qp);
-	if (ret) {
-		printf("Error during storing qp\n");
+	if (ret)
 		goto err_destroy;
-	}
 	pthread_mutex_unlock(&to_mctx(pd->context)->qp_table_mutex);
 
 	qp->rq.wqe_cnt = qp->rq.max_post = attr->cap.max_recv_wr;
@@ -569,8 +547,10 @@ int mlx4_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr,
 	int ret;
 
 	if (attr_mask & IBV_QP_PORT) {
-		if (ibv_query_port(qp->pd->context, attr->port_num, &port_attr))
-			return -1;
+		ret = ibv_query_port(qp->pd->context, attr->port_num,
+				     &port_attr);
+		if (ret)
+			return ret;
 		mqp->link_layer = port_attr.link_layer;
 	}
 

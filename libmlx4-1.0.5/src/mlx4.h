@@ -83,9 +83,9 @@
 
 #define PFX		"mlx4: "
 
-enum {
-	MLX4_CQ_ENTRY_SIZE		= 0x20
-};
+#ifndef HAVE_IBV_QPT_RAW_PACKET
+#define IBV_QPT_RAW_PACKET		8
+#endif
 
 enum {
 	MLX4_STAT_RATE_OFFSET		= 5
@@ -114,8 +114,8 @@ enum {
 	MLX4_OPCODE_RDMA_READ		= 0x10,
 	MLX4_OPCODE_ATOMIC_CS		= 0x11,
 	MLX4_OPCODE_ATOMIC_FA		= 0x12,
-	MLX4_OPCODE_ATOMIC_MASK_CS	= 0x14,
-	MLX4_OPCODE_ATOMIC_MASK_FA	= 0x15,
+	MLX4_OPCODE_MASKED_ATOMIC_CS	= 0x14,
+	MLX4_OPCODE_MASKED_ATOMIC_FA	= 0x15,
 	MLX4_OPCODE_BIND_MW		= 0x18,
 	MLX4_OPCODE_FMR			= 0x19,
 	MLX4_OPCODE_LOCAL_INVAL		= 0x1b,
@@ -133,6 +133,7 @@ enum {
 struct mlx4_device {
 	struct ibv_device		ibv_dev;
 	int				page_size;
+	int				abi_version;
 };
 
 struct mlx4_db_page;
@@ -159,6 +160,7 @@ struct mlx4_context {
 
 	struct mlx4_db_page	       *db_list[MLX4_NUM_DB_TYPE];
 	pthread_mutex_t			db_list_mutex;
+	int				cqe_size;
 };
 
 struct mlx4_buf {
@@ -181,6 +183,7 @@ struct mlx4_cq {
 	uint32_t		       *set_ci_db;
 	uint32_t		       *arm_db;
 	int				arm_sn;
+	int				cqe_size;
 };
 
 struct mlx4_srq {
@@ -245,6 +248,21 @@ struct mlx4_ah {
 	struct mlx4_av			av;
 	uint16_t			vlan;
 	uint8_t				mac[6];
+};
+
+struct mlx4_cqe {
+	uint32_t	vlan_my_qpn;
+	uint32_t	immed_rss_invalid;
+	uint32_t	g_mlpath_rqpn;
+	uint8_t		sl_vid;
+	uint8_t		reserved1;
+	uint16_t	rlid;
+	uint32_t	reserved2;
+	uint32_t	byte_cnt;
+	uint16_t	wqe_index;
+	uint16_t	checksum;
+	uint8_t		reserved3[3];
+	uint8_t		owner_sr_opcode;
 };
 
 static inline unsigned long align(unsigned long val, unsigned long align)
@@ -312,7 +330,8 @@ int mlx4_dereg_mr(struct ibv_mr *mr);
 struct ibv_cq *mlx4_create_cq(struct ibv_context *context, int cqe,
 			       struct ibv_comp_channel *channel,
 			       int comp_vector);
-int mlx4_alloc_cq_buf(struct mlx4_device *dev, struct mlx4_buf *buf, int nent);
+int mlx4_alloc_cq_buf(struct mlx4_device *dev, struct mlx4_buf *buf, int nent,
+		      int entry_size);
 int mlx4_resize_cq(struct ibv_cq *cq, int cqe);
 int mlx4_destroy_cq(struct ibv_cq *cq);
 int mlx4_poll_cq(struct ibv_cq *cq, int ne, struct ibv_wc *wc);
@@ -368,4 +387,5 @@ void mlx4_free_av(struct mlx4_ah *ah);
 
 void *vib_search_db_page(struct mlx4_context *context, enum mlx4_db_type type);
 void *vib_get_db_addr(struct mlx4_context *context, enum mlx4_db_type type);
+
 #endif /* MLX4_H */

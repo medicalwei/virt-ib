@@ -1,19 +1,17 @@
 dnl Process this file with autoconf to produce a configure script.
 
-AC_PREREQ(2.57)
-AC_INIT(libmlx4, 1.0.4, linux-rdma@vger.kernel.org)
+AC_PREREQ([2.67])
+AC_INIT([libmlx4],[1.0.5],[linux-rdma@vger.kernel.org])
 AC_CONFIG_SRCDIR([src/mlx4.h])
 AC_CONFIG_AUX_DIR(config)
 AC_CONFIG_HEADER(config.h)
 AM_INIT_AUTOMAKE([foreign])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
-AC_PROG_LIBTOOL
 LT_INIT
 
 AC_ARG_WITH([valgrind],
-    AC_HELP_STRING([--with-valgrind],
-        [Enable Valgrind annotations (small runtime overhead, default NO)]))
+    AS_HELP_STRING([--with-valgrind],[Enable Valgrind annotations (small runtime overhead, default NO)]))
 if test x$with_valgrind = x || test x$with_valgrind = xno; then
     want_valgrind=no
     AC_DEFINE([NVALGRIND], 1, [Define to 1 to disable Valgrind annotations.])
@@ -26,6 +24,7 @@ fi
 
 dnl Checks for programs
 AC_PROG_CC
+AC_LANG([C])
 
 dnl Checks for libraries
 AC_CHECK_LIB(ibverbs, ibv_get_device_list, [],
@@ -45,6 +44,16 @@ AC_CHECK_HEADER(valgrind/memcheck.h,
 dnl Checks for typedefs, structures, and compiler characteristics.
 AC_C_CONST
 AC_CHECK_SIZEOF(long)
+
+AC_CACHE_CHECK([for IBV_QPT_RAW_PACKET],
+               [ac_cv_ibv_qpt_raw_packet],
+               [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([],
+                                                   [enum ibv_qp_type qpt = IBV_QPT_RAW_PACKET;])],
+                                   [ac_cv_ibv_qpt_raw_packet=yes],
+                                   [ac_cv_ibv_qpt_raw_packet=no])])
+if test $ac_cv_ibv_qpt_raw_packet = yes; then
+    AC_DEFINE([HAVE_IBV_QPT_RAW_PACKET], 1, [libibverbs has raw packet QP support])
+fi
 
 dnl Checks for library functions
 AC_CHECK_FUNC(ibv_read_sysfs_file, [],

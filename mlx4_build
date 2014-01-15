@@ -2,9 +2,9 @@
 
 rm ~/rpmbuild/RPMS/x86_64/libmlx4-*
 
-tar zcvf libmlx4-1.0.4.tar.gz libmlx4-1.0.4/*
-cp libmlx4-1.0.4/libmlx4.spec ~/rpmbuild/SPECS/
-mv libmlx4-1.0.4.tar.gz ~/rpmbuild/SOURCES/
+tar zcvf libmlx4-1.0.5.tar.gz libmlx4-1.0.5/*
+cp libmlx4-1.0.5/libmlx4.spec ~/rpmbuild/SPECS/
+mv libmlx4-1.0.5.tar.gz ~/rpmbuild/SOURCES/
 cd ~/rpmbuild/SPECS/ 
 
 rpmbuild -bb libmlx4.spec 

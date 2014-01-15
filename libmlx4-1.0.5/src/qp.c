@@ -267,6 +267,8 @@ int mlx4_post_send(struct ibv_qp *ibqp, struct ibv_send_wr *wr,
 				/* fall through */
 			case IBV_WR_RDMA_WRITE:
 			case IBV_WR_RDMA_WRITE_WITH_IMM:
+				if (!wr->num_sge)
+					inl = 1;
 				set_raddr_seg(wqe, wr->wr.rdma.remote_addr,
 					      wr->wr.rdma.rkey);
 				wqe  += sizeof (struct mlx4_wqe_raddr_seg);
@@ -284,6 +286,12 @@ int mlx4_post_send(struct ibv_qp *ibqp, struct ibv_send_wr *wr,
 			set_datagram_seg(wqe, wr);
 			wqe  += sizeof (struct mlx4_wqe_datagram_seg);
 			size += sizeof (struct mlx4_wqe_datagram_seg) / 16;
+			break;
+
+		case IBV_QPT_RAW_PACKET:
+			/* For raw eth, the MLX4_WQE_CTRL_SOLICIT flag is used
+			 * to indicate that no icrc should be calculated */
+			ctrl->srcrb_flags |= htonl(MLX4_WQE_CTRL_SOLICIT);
 			break;
 
 		default:
@@ -394,7 +402,7 @@ int mlx4_post_send(struct ibv_qp *ibqp, struct ibv_send_wr *wr,
 out:
 	ctx = to_mctx(ibqp->context);
 
-	if (nreq == 1 && inl && size > 1 && size < ctx->bf_buf_size / 16) {
+	if (nreq == 1 && inl && size > 1 && size <= ctx->bf_buf_size / 16) {
 		ctrl->owner_opcode |= htonl((qp->sq.head & 0xffff) << 8);
 		*(uint32_t *) ctrl->reserved |= qp->doorbell_qpn;
 		/*
@@ -407,12 +415,9 @@ out:
 
 		pthread_spin_lock(&ctx->bf_lock);
 
-/*		mlx4_bf_copy(ctx->bf_page + ctx->bf_offset, (unsigned long *) ctrl,
-			     align(size * 16, 64));
-*/
 		vib_cmd_buf_copy(qp->ibv_qp.context->cmd_fd,
-                            (ctx->bf_page + ctx->bf_offset), (unsigned long *) ctrl,
-                            align(size * 16, 64));
+				(ctx->bf_page + ctx->bf_offset), (unsigned long *) ctrl,
+				align(size * 16, 64));
 		wc_wmb();
 
 		ctx->bf_offset ^= ctx->bf_buf_size;
@@ -427,9 +432,8 @@ out:
 		 */
 		wmb();
 
-		//*(uint32_t *) (ctx->uar + MLX4_SEND_DOORBELL) = qp->doorbell_qpn;
-		 vib_cmd_ring_doorbell(qp->ibv_qp.context->cmd_fd,
-                                 (ctx->uar + MLX4_SEND_DOORBELL), qp->doorbell_qpn, 1);
+		vib_cmd_ring_doorbell(qp->ibv_qp.context->cmd_fd,
+				(ctx->uar + MLX4_SEND_DOORBELL), qp->doorbell_qpn, 1);
 	}
 
 	if (nreq)
@@ -676,10 +680,6 @@ struct mlx4_qp *mlx4_find_qp(struct mlx4_context *ctx, uint32_t qpn)
 int mlx4_store_qp(struct mlx4_context *ctx, uint32_t qpn, struct mlx4_qp *qp)
 {
 	int tind = (qpn & (ctx->num_qps - 1)) >> ctx->qp_table_shift;
-	printf("qpn %d, num_qps %d, tind %d\n", qpn, ctx->num_qps, tind);
-	printf("qp_table %p\n", ctx->qp_table);
-	printf("qp_table[%d] %p\n", tind, ctx->qp_table[tind]);
-	printf("qp_table[%d].table %p\n", tind, ctx->qp_table[tind].table);
 
 	if (!ctx->qp_table[tind].refcnt) {
 		ctx->qp_table[tind].table = calloc(ctx->qp_table_mask + 1,
