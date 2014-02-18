@@ -416,8 +416,8 @@ out:
 		pthread_spin_lock(&ctx->bf_lock);
 
 		vib_cmd_buf_copy(qp->ibv_qp.context->cmd_fd,
-				(ctx->bf_page + ctx->bf_offset), (unsigned long *) ctrl,
-				align(size * 16, 64));
+                            (ctx->bf_page + ctx->bf_offset), (unsigned long *) ctrl,
+                            align(size * 16, 64));
 		wc_wmb();
 
 		ctx->bf_offset ^= ctx->bf_buf_size;
@@ -433,7 +433,7 @@ out:
 		wmb();
 
 		vib_cmd_ring_doorbell(qp->ibv_qp.context->cmd_fd,
-				(ctx->uar + MLX4_SEND_DOORBELL), qp->doorbell_qpn, 1);
+                                 (ctx->uar + MLX4_SEND_DOORBELL), qp->doorbell_qpn, 1);
 	}
 
 	if (nreq)

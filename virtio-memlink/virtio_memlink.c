@@ -34,11 +34,13 @@ struct virtio_memlink
 	struct virtio_device *vdev;
 	struct virtqueue *create_vq;
 	struct virtqueue *revoke_vq;
+};
 
+struct virtio_memlink_file
+{
+	struct virtio_memlink *vml;
+	struct completion acked;
 	struct memlink *memlinks_head;
-
-	struct completion create_acked;
-	struct completion revoke_acked;
 };
 
 static struct virtio_memlink *vml_global;
@@ -48,25 +50,14 @@ static struct virtio_device_id id_table[] = {
 	{ 0 },
 };
 
-static void memlink_create_ack(struct virtqueue *vq)
+static void memlink_ack(struct virtqueue *vq)
 {
-	struct virtio_memlink *vml;
+	struct virtio_memlink_file *file;
 	unsigned int len;
 
-	vml = virtqueue_get_buf(vq, &len);
-	if (vml) {
-		complete(&vml->create_acked);
+	while((file = virtqueue_get_buf(vq, &len)) != 0) {
+		complete(&file->acked);
 	}
-}
-
-static void memlink_revoke_ack(struct virtqueue *vq)
-{
-	struct virtio_memlink *vml;
-	unsigned int len;
-
-	vml = virtqueue_get_buf(vq, &len);
-	if (vml)
-		complete(&vml->revoke_acked);
 }
 
 static void virtmemlink_changed(struct virtio_device *vdev)
@@ -86,9 +77,10 @@ void memlink_free(struct memlink *ml){
 	kfree(ml->pfns);
 }
 
-static int create(struct virtio_memlink *vml, struct virtio_memlink_ioctl_input *input)
+static int create(struct virtio_memlink_file *file, struct virtio_memlink_ioctl_input *input)
 {
 	struct scatterlist sg[4];
+	struct virtio_memlink *vml = file->vml;
 	struct virtqueue *vq = vml->create_vq;
 	int err, i;
 	struct memlink *ml = kmalloc(sizeof(struct memlink), GFP_KERNEL);
@@ -142,44 +134,46 @@ static int create(struct virtio_memlink *vml, struct virtio_memlink_ioctl_input 
 	sg_init_one(&sg[1], &ml->offset, sizeof(ml->offset));
 	sg_init_one(&sg[2], ml->pfns,
 			sizeof(ml->pfns[0]) * ml->num_pfns);
-	sg_init_one(&sg[3], &ml->hva, sizeof(input->hva));
+	sg_init_one(&sg[3], &ml->hva, sizeof(ml->hva));
 
-	init_completion(&vml->create_acked);
-
-	BUG_ON(virtqueue_add_buf(vq, sg, 3, 1, vml) < 0);
+	BUG_ON(virtqueue_add_buf(vq, sg, 3, 1, file) < 0);
 
 	virtqueue_kick(vq);
+	wait_for_completion(&file->acked);
 
-	wait_for_completion(&vml->create_acked);
-
-	if (input->hva == 0) {
+	if (ml->hva == 0) {
 		memlink_free(ml);
 		return -ENOSPC;
 	}
 
 	input->hva = ml->hva;
 
-	ml->next = vml->memlinks_head;
+	ml->next = file->memlinks_head;
 	ml->pprev = NULL;
 	if (ml->next != NULL) {
 		ml->next->pprev = ml->next;
 	}
 
-	vml->memlinks_head = ml;
+	file->memlinks_head = ml;
 
 	return 0;
 }
 
-static int revoke(struct virtio_memlink *vml, uint64_t hva)
+static int revoke(struct virtio_memlink_file *file, uint64_t hva)
 {
+	struct virtio_memlink *vml = file->vml;
 	struct virtqueue *vq = vml->revoke_vq;
 	struct scatterlist sg;
 	struct memlink *ml;
 
-	for (ml = vml->memlinks_head; ml != NULL; ml = ml->next){
-		if (ml->hva == hva){
-			break;
+	if (hva != 0){
+		for (ml = file->memlinks_head; ml != NULL; ml = ml->next){
+			if (ml->hva == hva){
+				break;
+			}
 		}
+	} else {
+		ml = file->memlinks_head;
 	}
 	if (ml == NULL) {
 		return -EINVAL;
@@ -187,20 +181,19 @@ static int revoke(struct virtio_memlink *vml, uint64_t hva)
 
 	/* revoke remote link */
 	sg_init_one(&sg, &ml->hva, sizeof(ml->hva));
-	init_completion(&vml->revoke_acked);
 
-	if (virtqueue_add_buf(vq, &sg, 1, 0, vml) < 0)
+	if (virtqueue_add_buf(vq, &sg, 1, 0, file) < 0)
 		BUG();
 
 	virtqueue_kick(vq);
-	wait_for_completion(&vml->revoke_acked);
+	wait_for_completion(&file->acked);
 
 
 	memlink_free(ml);
 	if (ml->pprev != NULL){
 		ml->pprev->next = ml->next;
 	} else {
-		vml->memlinks_head = ml->next;
+		file->memlinks_head = ml->next;
 	}
 	if (ml->next != NULL){
 		ml->next->pprev = ml->pprev;
@@ -211,18 +204,16 @@ static int revoke(struct virtio_memlink *vml, uint64_t hva)
 	return 0;
 }
 
-static void reset(struct virtio_memlink *vml)
+static void reset(struct virtio_memlink_file *file)
 {
-	int i;
-	for(i=0; i<MEMLINK_MAX_LINKS; i++){
-		revoke(vml, i);
-	}
+	/* drop all memlinks */
+	while(revoke(file, 0) == 0);
 }
 
 static int init_vq(struct virtio_memlink *vml)
 {
 	struct virtqueue *vqs[2];
-	vq_callback_t *callbacks[] = { memlink_create_ack, memlink_revoke_ack };
+	vq_callback_t *callbacks[] = { memlink_ack, memlink_ack };
 	const char *names[] = { "memlink" };
 	int err;
 
@@ -258,8 +249,6 @@ static int virtmemlink_probe(struct virtio_device *vdev)
 
 	vml_global = vml;
 
-	vml->memlinks_head = NULL;
-
 	return 0;
 
 out_free_vml:
@@ -272,8 +261,6 @@ out:
 static void virtmemlink_remove(struct virtio_device *vdev)
 {
 	struct virtio_memlink *vml = vdev->priv;
-
-	reset(vml);
 
 	vml->vdev->config->reset(vml->vdev);
 	vml->vdev->config->del_vqs(vml->vdev);
@@ -298,23 +285,34 @@ static struct virtio_driver virtio_memlink_driver = {
 
 static int dev_open(struct inode *inode, struct file *filp)
 {
+	struct virtio_memlink_file * file;
 #if DEBUG
 	printk(KERN_INFO "dev_open\n");
 #endif
+	file = kmalloc(sizeof(struct virtio_memlink_file), GFP_KERNEL);
+	file->vml = vml_global;
+	init_completion(&file->acked);
+	file->memlinks_head = NULL;
+	filp->private_data = file;
 	return 0;
 }
 
 static int dev_release(struct inode *inode, struct file *filp)
 {
+	struct virtio_memlink_file * file = filp->private_data;
 #if DEBUG
 	printk(KERN_INFO "dev_release\n");
 #endif
+	reset(file);
+	kfree(file);
+
 	return 0;
 }
 
 static int dev_ioctl(struct inode *inode, struct file *filp,
 		unsigned int cmd, unsigned long args)
 {
+	struct virtio_memlink_file *file = filp->private_data;
 	struct virtio_memlink_ioctl_input input;
 	int revoke_id;
 	int ret;
@@ -332,7 +330,7 @@ static int dev_ioctl(struct inode *inode, struct file *filp,
 				return -EFAULT;
 			}
 
-			ret = create(vml_global, &input);
+			ret = create(file, &input);
 			if (ret < 0){
 				printk(KERN_ERR "%s: memlink failed to create.\n", __FUNCTION__);
 			} else {
@@ -346,7 +344,7 @@ static int dev_ioctl(struct inode *inode, struct file *filp,
 			// TODO: debug
 			revoke_id = (int)args;
 			printk(KERN_ERR "%s: revoking %d\n", __FUNCTION__, revoke_id);
-			revoke(vml_global, revoke_id);
+			revoke(file, revoke_id);
 			break;
 
 		default:

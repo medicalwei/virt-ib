@@ -182,19 +182,15 @@ int __ibv_close_device(struct ibv_context *context)
 	}
 
 	context->device->ops.free_context(context);
-/*CLOSE ASYNC_FD*/
-	IBV_INIT_CMD(&cmd, sizeof cmd, CLOSE_DEV_FD);
-	VIB_INIT_CMD(hdr, &cmd, sizeof cmd, NULL, -1, async_fd);
-	write(cmd_fd, &hdr, sizeof hdr);	
+
+	close(async_fd);
 
 /*CLOSE DEVICE FD*/
         IBV_INIT_CMD(&cmd, sizeof cmd, CLOSE_DEV_FD);
 	VIB_INIT_CMD(hdr, &cmd, sizeof cmd, NULL, getpid(), context->host_fd);
-	
 	write(cmd_fd, &hdr, sizeof hdr);	
-
-	//close(async_fd);
 	close(cmd_fd);
+
 	if (abi_ver <= 2)
 		close(cq_fd);
 
@@ -209,15 +205,8 @@ int __ibv_get_async_event(struct ibv_context *context,
 	struct vib_cmd_hdr          hdr;
 	struct vib_cmd		    cmd;
 
-/*
 	if (read(context->async_fd, &ev, sizeof ev) != sizeof ev)
 		return -1;
-*/
-	IBV_INIT_CMD_RESP(&cmd, sizeof cmd, GET_EVENT, &ev, sizeof ev);
-	VIB_INIT_CMD(hdr, &cmd, sizeof cmd, &ev, sizeof ev, context->host_fd);
-
-	if (write(context->cmd_fd, &hdr, sizeof hdr) != sizeof ev)
-                return -1;
 
 	event->event_type = ev.event_type;
 

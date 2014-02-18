@@ -264,11 +264,6 @@ int ibv_destroy_comp_channel(struct ibv_comp_channel *channel)
 		goto out;
 	}
 
-	IBV_INIT_CMD(&cmd, sizeof cmd, CLOSE_DEV_FD);
-	VIB_INIT_CMD(hdr, &cmd, sizeof cmd, NULL, -1, channel->fd);
-
-	write(channel->context->cmd_fd, &hdr, sizeof hdr);
-
 	close(channel->fd);
 	free(channel);
 	ret = 0;
@@ -342,13 +337,8 @@ int __ibv_get_cq_event(struct ibv_comp_channel *channel,
 	struct vib_cmd_hdr    hdr;
 	struct vib_cmd 	      cmd;
 
-	IBV_INIT_CMD_RESP(&cmd, sizeof cmd, GET_EVENT, &ev, sizeof ev);
-	VIB_INIT_CMD(hdr, &cmd, sizeof cmd, &ev, sizeof ev, channel->fd);
-
-	if (write(channel->context->cmd_fd, &hdr, sizeof hdr) != sizeof ev)
-                return -1;
-	/*if (read(channel->fd, &ev, sizeof ev) != sizeof ev)
-		return -1;*/
+	if (read(channel->fd, &ev, sizeof ev) != sizeof ev)
+		return -1;
 
 	*cq         = (struct ibv_cq *) (uintptr_t) ev.cq_handle;
 	*cq_context = (*cq)->cq_context;
