@@ -385,6 +385,4 @@ int mlx4_alloc_av(struct mlx4_pd *pd, struct ibv_ah_attr *attr,
 		   struct mlx4_ah *ah);
 void mlx4_free_av(struct mlx4_ah *ah);
 
-uint32_t *vib_get_host_db_addr(struct mlx4_context *context, enum mlx4_db_type type, uint32_t *db);
-
 #endif /* MLX4_H */

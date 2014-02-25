@@ -74,14 +74,20 @@ struct ibv_driver {
 	struct ibv_driver      *next;
 };
 
+struct vib_find_sysfs_devs {
+	__u32 command;
+	__u16 in_words;
+	__u16 out_words;
+	__u64 response;
+};
+
 static struct ibv_sysfs_dev *sysfs_dev_list;
 static struct ibv_driver_name *driver_name_list;
 static struct ibv_driver *head_driver, *tail_driver;
 
 static int vib_find_sysfs_devs(void)
 {
-	struct vib_cmd_hdr hdr;
-	struct vib_cmd cmd;
+	struct vib_find_sysfs_devs cmd;
 	struct ibv_sysfs_dev *sysfs_list;
 	struct ibv_sysfs_dev *sysfs_dev;
 	int ret = 0;
@@ -95,8 +101,6 @@ static int vib_find_sysfs_devs(void)
 		sysfs_list[i].have_driver = -1;
 
 	IBV_INIT_CMD_RESP(&cmd, sizeof(cmd), FIND_SYSFS, sysfs_list, 10*sizeof(struct ibv_sysfs_dev));
-	
-	VIB_INIT_CMD(hdr, &cmd, sizeof(cmd), sysfs_list, 10*sizeof(struct ibv_sysfs_dev), -1);
 
 	cmd_fd = open(uverbs0, O_RDWR);
 	if (cmd_fd < 0){
@@ -106,7 +110,7 @@ static int vib_find_sysfs_devs(void)
 	}
 	
 	/*Write to virtib device to get sysfs of host InfiniBand*/
-	ret = write(cmd_fd, &hdr, sizeof(hdr));
+	ret = write(cmd_fd, &cmd, sizeof(cmd));
 	close(cmd_fd);
 
 	/*After getting results, put the results back to sysfs_dev_list*/

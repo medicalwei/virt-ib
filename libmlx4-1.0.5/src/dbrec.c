@@ -46,7 +46,6 @@ struct mlx4_db_page {
 	struct mlx4_buf			buf;
 	int				num_db;
 	int				use_cnt;
-	struct vib_mlink		mlink;
 	unsigned long			free[0];
 };
 
@@ -73,7 +72,6 @@ static struct mlx4_db_page *__add_page(struct mlx4_context *context,
 		free(page);
 		return NULL;
 	}
-	vib_cmd_reassemble_memory(page->buf.buf, page->buf.length, &page->mlink);
 
 	page->num_db  = pp;
 	page->use_cnt = 0;
@@ -147,30 +145,10 @@ void mlx4_free_db(struct mlx4_context *context, enum mlx4_db_type type, uint32_t
 		if (page->next)
 			page->next->prev = page->prev;
 
-		vib_cmd_return_memory(&page->mlink);
 		mlx4_free_buf(&page->buf);
 		free(page);
 	}
 
 out:
 	pthread_mutex_unlock(&context->db_list_mutex);
-}
-
-uint32_t *vib_get_host_db_addr(struct mlx4_context *context, enum mlx4_db_type type, uint32_t *db)
-{
-	struct mlx4_db_page *page;
-	uintptr_t ps = to_mdev(context->ibv_ctx.device)->page_size;
-	uint32_t *host_db = NULL;
-
-	for (page = context->db_list[type]; page; page = page->next)
-		if (((uintptr_t) db & ~(ps - 1)) == (uintptr_t) page->buf.buf)
-			break;
-
-	if (!page)
-		goto out;
-
-	host_db = ((uintptr_t) db & (ps - 1)) + (uintptr_t) page->mlink.hva;
-
-out:
-	return host_db;
 }

@@ -169,13 +169,15 @@ static struct ibv_context *mlx4_alloc_context(struct ibv_device *ibdev, int cmd_
 
 	pthread_mutex_init(&context->db_list_mutex, NULL);
 
-	context->uar = vib_cmd_mmap(cmd_fd, to_mdev(ibdev)->page_size, PROT_WRITE, MAP_SHARED, 0);
+	context->uar = mmap(NULL, to_mdev(ibdev)->page_size, PROT_WRITE,
+			    MAP_SHARED, cmd_fd, 0);
 	if (context->uar == MAP_FAILED)
 		goto err_free;
 
 	if (bf_reg_size) {
-		context->bf_page = vib_cmd_mmap(cmd_fd, to_mdev(ibdev)->page_size,
-				PROT_WRITE, MAP_SHARED, to_mdev(ibdev)->page_size);
+		context->bf_page = mmap(NULL, to_mdev(ibdev)->page_size,
+					PROT_WRITE, MAP_SHARED, cmd_fd,
+					to_mdev(ibdev)->page_size);
 		if (context->bf_page == MAP_FAILED) {
 			fprintf(stderr, PFX "Warning: BlueFlame available, "
 				"but failed to mmap() BlueFlame page.\n");
@@ -198,9 +200,6 @@ static struct ibv_context *mlx4_alloc_context(struct ibv_device *ibdev, int cmd_
 	return &context->ibv_ctx;
 
 err_free:
-	vib_cmd_unmap(context->ibv_ctx.cmd_fd, context->uar, to_mdev(ibdev)->page_size);
-	if (context->bf_page)
-		vib_cmd_unmap(context->ibv_ctx.cmd_fd, context->bf_page, to_mdev(ibdev)->page_size);
 	free(context);
 	return NULL;
 }
@@ -209,9 +208,9 @@ static void mlx4_free_context(struct ibv_context *ibctx)
 {
 	struct mlx4_context *context = to_mctx(ibctx);
 
-	vib_cmd_unmap(ibctx->cmd_fd, context->uar, to_mdev(ibctx->device)->page_size);
+	munmap(context->uar, to_mdev(ibctx->device)->page_size);
 	if (context->bf_page)
-		vib_cmd_unmap(ibctx->cmd_fd, context->bf_page, to_mdev(ibctx->device)->page_size);
+		munmap(context->bf_page, to_mdev(ibctx->device)->page_size);
 	free(context);
 }
 

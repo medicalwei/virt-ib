@@ -212,7 +212,6 @@ struct ibv_comp_channel *ibv_create_comp_channel(struct ibv_context *context)
 	struct ibv_comp_channel            *channel;
 	struct ibv_create_comp_channel      cmd;
 	struct ibv_create_comp_channel_resp resp;
-	struct vib_cmd_hdr		    hdr;
 
 	if (abi_ver <= 2)
 		return ibv_create_comp_channel_v2(context);
@@ -222,8 +221,7 @@ struct ibv_comp_channel *ibv_create_comp_channel(struct ibv_context *context)
 		return NULL;
 
 	IBV_INIT_CMD_RESP(&cmd, sizeof cmd, CREATE_COMP_CHANNEL, &resp, sizeof resp);
-	VIB_INIT_CMD(hdr, &cmd, sizeof cmd, &resp, sizeof resp, context->host_fd);
-	if (write(context->cmd_fd, &hdr, sizeof hdr) != sizeof cmd) {
+	if (write(context->cmd_fd, &cmd, sizeof cmd) != sizeof cmd) {
 		free(channel);
 		return NULL;
 	}
@@ -248,8 +246,6 @@ int ibv_destroy_comp_channel(struct ibv_comp_channel *channel)
 {
 	struct ibv_context *context;
 	int ret;
-	struct  vib_cmd_hdr hdr;
-	struct  vib_cmd	    cmd;
 
 	context = channel->context;
 	pthread_mutex_lock(&context->mutex);
@@ -334,8 +330,6 @@ int __ibv_get_cq_event(struct ibv_comp_channel *channel,
 		       struct ibv_cq **cq, void **cq_context)
 {
 	struct ibv_comp_event ev;
-	struct vib_cmd_hdr    hdr;
-	struct vib_cmd 	      cmd;
 
 	if (read(channel->fd, &ev, sizeof ev) != sizeof ev)
 		return -1;

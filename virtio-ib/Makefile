@@ -9,8 +9,5 @@ all:
 clean:
 	make -C $(KDIR) M=$(PWD) clean
 run: all
-	-rm /dev/virtib
 	-rmmod virtio_ib
-	
 	insmod virtio_ib.ko
-	mknod /dev/virtib c `cat /proc/devices | grep virtib | cut -d' ' -f 1` 0

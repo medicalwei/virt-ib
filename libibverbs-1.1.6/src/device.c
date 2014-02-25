@@ -127,12 +127,6 @@ struct ibv_context *__ibv_open_device(struct ibv_device *device)
 	char *devpath;
 	int cmd_fd;
 	struct ibv_context *context;
-	struct vib_cmd_hdr hdr;
-	struct vib_cmd cmd;
-	int host_fd = 0;
-
-	IBV_INIT_CMD(&cmd, sizeof(cmd), OPEN_DEV);
-	VIB_INIT_CMD(hdr, &cmd, sizeof(cmd), &host_fd, sizeof(int), getpid());
 
 	if (asprintf(&devpath, "/dev/infiniband/%s", device->dev_name) < 0)
 		return NULL;
@@ -141,21 +135,19 @@ struct ibv_context *__ibv_open_device(struct ibv_device *device)
 	 * We'll only be doing writes, but we need O_RDWR in case the
 	 * provider needs to mmap() the file.
 	 */
-	cmd_fd  = open(uverbs0, O_RDWR);
+	cmd_fd = open(uverbs0, O_RDWR);
 	free(devpath);
-	host_fd = write(cmd_fd, &hdr, sizeof(hdr)); 
 
-	if (cmd_fd < 0 || host_fd < 0)
+	if (cmd_fd < 0)
 		return NULL;
 
 	context = device->ops.alloc_context(device, cmd_fd);
 	if (!context)
 		goto err;
 
-	context->device  = device;
-	context->cmd_fd  = cmd_fd;
-	context->host_fd = host_fd; 
-	context->mtt     = NULL; 
+	context->device = device;
+	context->cmd_fd = cmd_fd;
+	context->mtt    = NULL;
 	pthread_mutex_init(&context->mutex, NULL);
 
 	return context;
@@ -172,8 +164,6 @@ int __ibv_close_device(struct ibv_context *context)
 	int async_fd = context->async_fd;
 	int cmd_fd   = context->cmd_fd;
 	int cq_fd    = -1;
-	struct vib_cmd_hdr hdr;
-	struct vib_cmd     cmd;
 
 	if (abi_ver <= 2) {
 		struct ibv_abi_compat_v2 *t = context->abi_compat;
@@ -184,13 +174,7 @@ int __ibv_close_device(struct ibv_context *context)
 	context->device->ops.free_context(context);
 
 	close(async_fd);
-
-/*CLOSE DEVICE FD*/
-        IBV_INIT_CMD(&cmd, sizeof cmd, CLOSE_DEV_FD);
-	VIB_INIT_CMD(hdr, &cmd, sizeof cmd, NULL, getpid(), context->host_fd);
-	write(cmd_fd, &hdr, sizeof hdr);	
 	close(cmd_fd);
-
 	if (abi_ver <= 2)
 		close(cq_fd);
 
@@ -202,8 +186,6 @@ int __ibv_get_async_event(struct ibv_context *context,
 			  struct ibv_async_event *event)
 {
 	struct ibv_kern_async_event ev;
-	struct vib_cmd_hdr          hdr;
-	struct vib_cmd		    cmd;
 
 	if (read(context->async_fd, &ev, sizeof ev) != sizeof ev)
 		return -1;

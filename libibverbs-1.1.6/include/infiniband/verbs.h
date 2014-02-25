@@ -721,7 +721,6 @@ struct ibv_context {
 	int			num_comp_vectors;
 	pthread_mutex_t		mutex;
 	void		       *abi_compat;
-	int 			host_fd;
 	struct vib_mtt	       *mtt;
 };
 
@@ -1185,11 +1184,6 @@ const char *ibv_port_state_str(enum ibv_port_state port_state);
  */
 const char *ibv_event_type_str(enum ibv_event_type event);
 
-/*
- *
- */
-void *vib_cmd_mmap(int cmd_fd, size_t page_size, int prot, int flag, size_t off);
-
 /**
  * 
  */
@@ -1199,22 +1193,6 @@ void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink);
  *
  */
 void vib_cmd_return_memory(struct vib_mlink *mlink);
-
-/*
- *
- */
-void vib_cmd_unmap(int cmd_fd, void* addr, size_t size);
-
-/*
- *
- */
-void vib_cmd_ring_doorbell(int cmd_fd, void* uar, uint32_t doorbell, int kind);
-
-/*
- *
- */
-void vib_cmd_buf_copy(int cmd_fd, void* dst, void* src, unsigned bytecnt);
-
 
 END_C_DECLS
 

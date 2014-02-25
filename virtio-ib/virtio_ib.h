@@ -3,45 +3,60 @@
 #include <linux/virtio_ids.h>
 #include <linux/virtio_pci.h>
 #include <linux/virtio.h>
+#include <rdma/ib_user_verbs.h>
 
 #define VIRTIO_ID_IB 99
-#define DBG 1
 
 enum{
-	IB_USER_VERBS_CMD_FIND_SYSFS = 1000,
-	IB_USER_VERBS_CMD_OPEN_DEV,
-	IB_USER_VERBS_CMD_MMAP,
-	IB_USER_VERBS_CMD_UNMAP,
-	IB_USER_VERBS_CMD_RING_DOORBELL,
-	IB_USER_VERBS_CMD_BUF_COPY,
-	IB_USER_VERBS_CMD_CLOSE_DEV_FD
+        VIRTIB_DEVICE_FIND_SYSFS = 1000,
+        VIRTIB_DEVICE_OPEN,
+        VIRTIB_DEVICE_CLOSE,
+        VIRTIB_DEVICE_MMAP,
+        VIRTIB_DEVICE_MUNMAP
 };
 
-struct vib_cmd_hdr{
-	__u32 fd;
-	__u32 cmd_size;
-	__u32 resp_size;
-	__u64 command;
-	__u64 response;
+enum{
+	VIRTIB_EVENT_READ,
+	VIRTIB_EVENT_POLL,
+	VIRTIB_EVENT_CLOSE
 };
 
-struct vib_cmd{
+struct virtib_hdr_with_resp {
 	__u32 command;
 	__u16 in_words;
 	__u16 out_words;
 	__u64 response;
 };
 
-enum{
-	VIRTIO_IB_DEVICE_OPEN,
-	VIRTIO_IB_DEVICE_CLOSE
+struct virtib_create_cq {
+	struct ib_uverbs_cmd_hdr	hdr;
+	struct ib_uverbs_create_cq	cmd;
+	__u64				buf_addr;
+	__u64				db_addr;
 };
 
-enum{
-	VIRTIO_IB_EVENT_READ,
-	VIRTIO_IB_EVENT_POLL,
-	VIRTIO_IB_EVENT_CLOSE
+struct virtib_resize_cq {
+	struct ib_uverbs_cmd_hdr	hdr;
+	struct ib_uverbs_resize_cq	cmd;
+	__u64				buf_addr;
 };
 
+struct virtib_create_srq {
+	struct ib_uverbs_cmd_hdr	hdr;
+	struct ib_uverbs_create_srq	cmd;
+	__u64				buf_addr;
+	__u64				db_addr;
+};
+
+struct virtib_create_qp {
+	struct ib_uverbs_cmd_hdr	hdr;
+	struct ib_uverbs_create_qp	cmd;
+	__u64				buf_addr;
+	__u64				db_addr;
+	__u8				log_sq_bb_count;
+	__u8				log_sq_stride;
+	__u8				sq_no_prefetch;	/* was reserved in ABI 2 */
+	__u8				reserved[5];
+};
 #endif
 
