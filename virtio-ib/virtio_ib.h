@@ -12,13 +12,13 @@ enum{
         VIRTIB_DEVICE_OPEN,
         VIRTIB_DEVICE_CLOSE,
         VIRTIB_DEVICE_MMAP,
-        VIRTIB_DEVICE_MUNMAP
+        VIRTIB_DEVICE_MUNMAP,
 };
 
 enum{
 	VIRTIB_EVENT_READ,
 	VIRTIB_EVENT_POLL,
-	VIRTIB_EVENT_CLOSE
+	VIRTIB_EVENT_CLOSE,
 };
 
 struct virtib_hdr_with_resp {
@@ -58,5 +58,11 @@ struct virtib_create_qp {
 	__u8				sq_no_prefetch;	/* was reserved in ABI 2 */
 	__u8				reserved[5];
 };
+
+struct virtib_create_ah {
+	struct ib_uverbs_cmd_hdr	hdr;
+	struct ib_uverbs_create_ah	cmd;
+};
+
 #endif
 

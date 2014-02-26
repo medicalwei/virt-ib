@@ -883,24 +883,18 @@ struct ibv_create_srq_resp_v5 {
 
 enum{
 	IB_USER_VERBS_CMD_FIND_SYSFS = 1000,
-	IB_USER_VERBS_CMD_OPEN_DEV,
+	IB_USER_VERBS_CMD_OPEN,
+	IB_USER_VERBS_CMD_CLOSE,
 	IB_USER_VERBS_CMD_MMAP,
-	IB_USER_VERBS_CMD_UNMAP,
-	IB_USER_VERBS_CMD_RING_DOORBELL,
-	IB_USER_VERBS_CMD_BUF_COPY,
-	IB_USER_VERBS_CMD_CLOSE_DEV_FD,
-	IB_USER_VERBS_CMD_GET_EVENT
+	IB_USER_VERBS_CMD_MUNMAP,
 };
 
 enum{
 	IB_USER_VERBS_CMD_FIND_SYSFS_V2 = 1000,
-	IB_USER_VERBS_CMD_OPEN_DEV_V2,
+	IB_USER_VERBS_CMD_OPEN_V2,
+	IB_USER_VERBS_CMD_CLOSE_V2,
 	IB_USER_VERBS_CMD_MMAP_V2,
-	IB_USER_VERBS_CMD_UNMAP_V2,
-	IB_USER_VERBS_CMD_RING_DOORBELL_V2,
-	IB_USER_VERBS_CMD_BUF_COPY_V2,
-	IB_USER_VERBS_CMD_CLOSE_DEV_FD_V2,
-	IB_USER_VERBS_CMD_GET_EVENT_V2
+	IB_USER_VERBS_CMD_MUNMAP_V2,
 };
 
 struct vib_cmd_hdr{
@@ -916,14 +910,6 @@ struct vib_cmd{
         __u16 in_words;
         __u16 out_words;
         __u64 response;
-};
-
-struct vib_mmap{
-        __u32 command;
-        __u32 page_size;
-        __u32 prot;
-        __u32 flags;
-        __u32 off;
 };
 
 #endif /* KERN_ABI_H */

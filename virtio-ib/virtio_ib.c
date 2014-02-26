@@ -287,45 +287,58 @@ static ssize_t virtib_device_find_sysfs(struct virtio_ib_file *file,
 	return ret;
 }
 
-void __virtib_convert_addresses_to_guest_phys(unsigned long *buf_addr,
-		unsigned long *db_addr){
+static void __virtib_convert_address_to_guest_phys(unsigned long *addr){
 	struct page *pg;
-	down_read(&current->mm->mmap_sem);
-	get_user_pages_fast(*buf_addr, 1, 1, &pg);
-	*buf_addr = page_to_phys(pg);
+	get_user_pages_fast(*addr, 1, 1, &pg);
+	*addr = page_to_phys(pg);
 	page_cache_release(pg);
-	if (db_addr){
-		get_user_pages_fast(*db_addr, 1, 1, &pg);
-		*db_addr = page_to_phys(pg);
-		page_cache_release(pg);
-	}
-	
-	up_read(&current->mm->mmap_sem);
 }
 
-void virtib_convert_addresses_to_guest_phys(void *buf)
+static void virtib_convert_addresses_to_guest_phys(void *buf)
 {
-	/* TODO: use dma instead */
 	struct ib_uverbs_cmd_hdr *hdr = buf;
 	if (hdr->command == IB_USER_VERBS_CMD_CREATE_CQ){
 		struct virtib_create_cq *cmd = buf;
-		__virtib_convert_addresses_to_guest_phys(
-				(long unsigned int *) &cmd->buf_addr,
+		down_read(&current->mm->mmap_sem);
+		__virtib_convert_address_to_guest_phys(
+				(long unsigned int *) &cmd->cmd.user_handle);
+		__virtib_convert_address_to_guest_phys(
+				(long unsigned int *) &cmd->buf_addr);
+		__virtib_convert_address_to_guest_phys(
 				(long unsigned int *) &cmd->db_addr);
+		up_read(&current->mm->mmap_sem);
 	} else if (hdr->command == IB_USER_VERBS_CMD_RESIZE_CQ){
 		struct virtib_resize_cq *cmd = buf;
-		__virtib_convert_addresses_to_guest_phys(
-				(long unsigned int *) &cmd->buf_addr, NULL);
+		down_read(&current->mm->mmap_sem);
+		__virtib_convert_address_to_guest_phys(
+				(long unsigned int *) &cmd->buf_addr);
+		up_read(&current->mm->mmap_sem);
 	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_SRQ){
 		struct virtib_create_srq *cmd = buf;
-		__virtib_convert_addresses_to_guest_phys(
-				(long unsigned int *) &cmd->buf_addr,
+		down_read(&current->mm->mmap_sem);
+		__virtib_convert_address_to_guest_phys(
+				(long unsigned int *) &cmd->cmd.user_handle);
+		__virtib_convert_address_to_guest_phys(
+				(long unsigned int *) &cmd->buf_addr);
+		__virtib_convert_address_to_guest_phys(
 				(long unsigned int *) &cmd->db_addr);
+		up_read(&current->mm->mmap_sem);
 	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_QP){
 		struct virtib_create_qp *cmd = buf;
-		__virtib_convert_addresses_to_guest_phys(
-				(long unsigned int *) &cmd->buf_addr,
+		down_read(&current->mm->mmap_sem);
+		__virtib_convert_address_to_guest_phys(
+				(long unsigned int *) &cmd->cmd.user_handle);
+		__virtib_convert_address_to_guest_phys(
+				(long unsigned int *) &cmd->buf_addr);
+		__virtib_convert_address_to_guest_phys(
 				(long unsigned int *) &cmd->db_addr);
+		up_read(&current->mm->mmap_sem);
+	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_AH){
+		struct virtib_create_ah *cmd = buf;
+		down_read(&current->mm->mmap_sem);
+		__virtib_convert_address_to_guest_phys(
+				(long unsigned int *) &cmd->cmd.user_handle);
+		up_read(&current->mm->mmap_sem);
 	}
 }
 
@@ -474,7 +487,7 @@ void virtib_mmap_vma_close(struct vm_area_struct *vma)
 
 struct vm_operations_struct virtib_mmap_vm_ops = {
 	.open  = virtib_mmap_vma_open,
-	.close = virtib_mmap_vma_close
+	.close = virtib_mmap_vma_close,
 };
 
 static int virtib_mmap(struct file *filp, struct vm_area_struct *vma)
@@ -527,7 +540,7 @@ struct file_operations virtib_fops = {
 	.release = virtib_release,
 	.read    = virtib_read,
 	.write   = virtib_write,
-	.mmap    = virtib_mmap
+	.mmap    = virtib_mmap,
 };
 
 static struct miscdevice virtib_misc = {
@@ -646,7 +659,7 @@ static struct virtio_driver virtio_ib_driver = {
 	.driver.owner       = THIS_MODULE,
 	.id_table           = id_table,
 	.probe              = virtib_probe,
-	.remove             = virtib_remove
+	.remove             = virtib_remove,
 };
 
 static int __init init(void){
