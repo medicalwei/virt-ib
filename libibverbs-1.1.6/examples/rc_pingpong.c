@@ -712,6 +712,7 @@ int main(int argc, char *argv[])
 	ctx->pending = PINGPONG_RECV_WRID;
 
 	if (servername) {
+		printf("first post send\n");
 		if (pp_post_send(ctx)) {
 			fprintf(stderr, "Couldn't post send\n");
 			return 1;
@@ -776,6 +777,7 @@ int main(int argc, char *argv[])
 
 				case PINGPONG_RECV_WRID:
 					if (--routs <= 1) {
+						printf("post recv\n");
 						routs += pp_post_recv(ctx, ctx->rx_depth - routs);
 						if (routs < ctx->rx_depth) {
 							fprintf(stderr,
@@ -796,6 +798,7 @@ int main(int argc, char *argv[])
 
 				ctx->pending &= ~(int) wc[i].wr_id;
 				if (scnt < iters && !ctx->pending) {
+					printf("post send\n");
 					if (pp_post_send(ctx)) {
 						fprintf(stderr, "Couldn't post send\n");
 						return 1;

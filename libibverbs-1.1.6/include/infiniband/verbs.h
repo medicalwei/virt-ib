@@ -1072,12 +1072,12 @@ static inline int ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr,
 	for (swr = wr; swr; swr = swr->next){
 		if(swr->send_flags & IBV_SEND_INLINE && swr->num_sge){
 			/* printf("SEND_INLINE data\n"); */
-		}		
+		}
 		else{
 			swr->sg_list->addr = vib_memory_translation(qp->context, swr->sg_list->addr);
 			if (!swr->sg_list->addr)
 				return -1;
-		}	
+		}
 	}
 
 	return qp->context->ops.post_send(qp, wr, bad_wr);
@@ -1090,13 +1090,13 @@ static inline int ibv_post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr,
 				struct ibv_recv_wr **bad_wr)
 {
 	struct ibv_recv_wr *rwr = NULL;
-	
+
 	for (rwr = wr; rwr; rwr = rwr->next){
 		rwr->sg_list->addr = vib_memory_translation(qp->context, rwr->sg_list->addr);
 		if (!rwr->sg_list->addr)
 			return -1;
 	}
-	
+
 	return qp->context->ops.post_recv(qp, wr, bad_wr);
 }
 

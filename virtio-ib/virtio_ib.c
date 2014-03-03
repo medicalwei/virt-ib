@@ -15,6 +15,7 @@
 #include <linux/poll.h>
 #include <linux/anon_inodes.h>
 #include <linux/pagemap.h>
+#include <linux/fdtable.h>
 #include <rdma/ib_user_verbs.h>
 
 #define IB_UVERBS_CMD_MAX_SIZE 16384
@@ -98,8 +99,11 @@ static ssize_t virtib_event_read(struct file *filp, char __user *buf,
 	BUG_ON(virtqueue_add_buf(vib->event_vq, sg, 3, 2, file) < 0);
 	virtqueue_kick(vib->event_vq);
 	wait_for_completion(&file->acked);
+	if (copy_to_user(buf, out, ret) > 0){
+		return -EINVAL;
+	}
 
-	return copy_to_user(buf, out, ret);
+	return ret;
 }
 
 static unsigned int virtib_event_poll(struct file *filp,
@@ -342,6 +346,24 @@ static void virtib_convert_addresses_to_guest_phys(void *buf)
 	}
 }
 
+static void virtib_replace_guest_fd_to_host_fd(void *buf)
+{
+	struct ib_uverbs_cmd_hdr *hdr = buf;
+	if (hdr->command == IB_USER_VERBS_CMD_CREATE_CQ) {
+		struct virtib_create_cq *s = (void *) buf;
+		struct file *filp; struct virtio_ib_event_file *file;
+		if (s->cmd.comp_channel != -1) {
+			rcu_read_lock();
+			filp = fcheck(s->cmd.comp_channel);
+			if (filp){
+				file = filp->private_data;
+				s->cmd.comp_channel = file->host_fd;
+			}
+			rcu_read_unlock();
+		}
+	}
+}
+
 static ssize_t virtib_write(struct file *filp, const char __user *buf,
 		size_t len, loff_t *f_pos)
 {
@@ -357,8 +379,8 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf,
 	if (hdr->command == VIRTIB_DEVICE_FIND_SYSFS)
 		return virtib_device_find_sysfs(file, hdr);
 
-	/* TODO: dealing with buffer and doorbell of CQ */
 	virtib_convert_addresses_to_guest_phys((void *) file->in_buf);
+	virtib_replace_guest_fd_to_host_fd((void *) file->in_buf);
 
 	sg_init_one(&sg[0], &file->host_fd, sizeof(file->host_fd));
 	sg_init_one(&sg[1], file->in_buf, len);
