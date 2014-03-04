@@ -306,42 +306,26 @@ static void virtib_convert_addresses_to_guest_phys(void *buf)
 		down_read(&current->mm->mmap_sem);
 		__virtib_convert_address_to_guest_phys(
 				(long unsigned int *) &cmd->cmd.user_handle);
-		__virtib_convert_address_to_guest_phys(
-				(long unsigned int *) &cmd->buf_addr);
-		__virtib_convert_address_to_guest_phys(
-				(long unsigned int *) &cmd->db_addr);
 		up_read(&current->mm->mmap_sem);
 	} else if (hdr->command == IB_USER_VERBS_CMD_RESIZE_CQ){
 		struct virtib_resize_cq *cmd = buf;
 		down_read(&current->mm->mmap_sem);
-		__virtib_convert_address_to_guest_phys(
-				(long unsigned int *) &cmd->buf_addr);
 		up_read(&current->mm->mmap_sem);
 	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_SRQ){
 		struct virtib_create_srq *cmd = buf;
 		down_read(&current->mm->mmap_sem);
 		__virtib_convert_address_to_guest_phys(
 				(long unsigned int *) &cmd->cmd.user_handle);
-		__virtib_convert_address_to_guest_phys(
-				(long unsigned int *) &cmd->buf_addr);
-		__virtib_convert_address_to_guest_phys(
-				(long unsigned int *) &cmd->db_addr);
 		up_read(&current->mm->mmap_sem);
 	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_QP){
 		struct virtib_create_qp *cmd = buf;
 		down_read(&current->mm->mmap_sem);
 		__virtib_convert_address_to_guest_phys(
 				(long unsigned int *) &cmd->cmd.user_handle);
-		__virtib_convert_address_to_guest_phys(
-				(long unsigned int *) &cmd->buf_addr);
-		__virtib_convert_address_to_guest_phys(
-				(long unsigned int *) &cmd->db_addr);
 		up_read(&current->mm->mmap_sem);
 	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_AH){
 		struct virtib_create_ah *cmd = buf;
 		down_read(&current->mm->mmap_sem);
-		__virtib_convert_address_to_guest_phys(
-				(long unsigned int *) &cmd->cmd.user_handle);
 		up_read(&current->mm->mmap_sem);
 	}
 }
