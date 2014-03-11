@@ -48,6 +48,12 @@ static inline void mlx4_write64(uint32_t val[2], struct mlx4_context *ctx, int o
 	*(volatile uint64_t *) (ctx->uar + offset) = MLX4_PAIR_TO_64(val);
 }
 
+static inline void vib_write64(uint32_t val[2], struct ibv_context *ctx, int offset)
+{
+	struct mlx4_context *mctx = to_mctx(ctx);
+	vib_cmd_massign_long(ctx, (uint64_t) (mctx->uar + offset), MLX4_PAIR_TO_64(val));
+}
+
 #else
 
 static inline void mlx4_write64(uint32_t val[2], struct mlx4_context *ctx, int offset)
@@ -60,7 +66,6 @@ static inline void mlx4_write64(uint32_t val[2], struct mlx4_context *ctx, int o
 
 #endif
 
-uint32_t *vib_get_host_db_addr(struct mlx4_context *context,
-		enum mlx4_db_type type, uint32_t *db);
+uint32_t *vib_get_host_db_addr(struct mlx4_context *context, enum mlx4_db_type type, uint32_t *db);
 
 #endif /* DOORBELL_H */

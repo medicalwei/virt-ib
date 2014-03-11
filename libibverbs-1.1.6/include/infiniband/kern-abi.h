@@ -887,6 +887,9 @@ enum{
 	IB_USER_VERBS_CMD_CLOSE,
 	IB_USER_VERBS_CMD_MMAP,
 	IB_USER_VERBS_CMD_MUNMAP,
+	IB_USER_VERBS_CMD_MCOPY,
+	IB_USER_VERBS_CMD_MASSIGN,
+	IB_USER_VERBS_CMD_MASSIGN_LONG,
 };
 
 enum{
@@ -895,21 +898,48 @@ enum{
 	IB_USER_VERBS_CMD_CLOSE_V2,
 	IB_USER_VERBS_CMD_MMAP_V2,
 	IB_USER_VERBS_CMD_MUNMAP_V2,
+	IB_USER_VERBS_CMD_MCOPY_V2,
+	IB_USER_VERBS_CMD_MASSIGN_V2,
+	IB_USER_VERBS_CMD_MASSIGN_LONG_V2,
 };
 
-struct vib_cmd_hdr{
-	__u32 fd;
-        __u32 cmd_size;
-        __u32 resp_size;
-	__u64 command;
-        __u64 response;
+struct vib_cmd_mmap {
+	__u32 command;
+	__u16 in_words;
+	__u16 out_words;
+	__u64 response;
+	__u32 offset;
 };
 
-struct vib_cmd{
-        __u32 command;
-        __u16 in_words;
-        __u16 out_words;
-        __u64 response;
+struct vib_cmd_mmap_resp {
+	__u64 hva;
+};
+
+struct vib_cmd_munmap {
+	__u32 command;
+	__u16 in_words;
+	__u16 out_words;
+	__u64 hva;
+};
+
+struct vib_cmd_mcopy {
+	__u32 command;
+	__u16 in_words;
+	__u16 out_words;
+	__u64 dst_hva;
+	__u64 src_addr;
+	__u32 bytecnt;
+};
+
+struct vib_cmd_massign {
+	__u32 command;
+	__u16 in_words;
+	__u16 out_words;
+	__u64 dst_hva;
+	union {
+		__u32 data;
+		__u64 data_long;
+	};
 };
 
 #endif /* KERN_ABI_H */

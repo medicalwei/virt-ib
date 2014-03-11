@@ -13,6 +13,9 @@ enum{
         VIRTIB_DEVICE_CLOSE,
         VIRTIB_DEVICE_MMAP,
         VIRTIB_DEVICE_MUNMAP,
+        VIRTIB_DEVICE_MCOPY,
+        VIRTIB_DEVICE_MASSIGN,
+        VIRTIB_DEVICE_MASSIGN_LONG,
 };
 
 enum{
@@ -26,6 +29,45 @@ struct virtib_hdr_with_resp {
 	__u16 in_words;
 	__u16 out_words;
 	__u64 response;
+};
+
+struct virtib_device_mmap {
+	__u32 command;
+	__u16 in_words;
+	__u16 out_words;
+	__u64 response;
+	__u32 offset;
+};
+
+struct virtib_device_mmap_resp {
+	__u64 hva;
+};
+
+struct virtib_device_munmap {
+	__u32 command;
+	__u16 in_words;
+	__u16 out_words;
+	__u64 hva;
+};
+
+struct virtib_device_mcopy {
+	__u32 command;
+	__u16 in_words;
+	__u16 out_words;
+	__u64 dst_hva;
+	__u64 src_addr;
+	__u32 bytecnt;
+};
+
+struct virtib_device_massign {
+	__u32 command;
+	__u16 in_words;
+	__u16 out_words;
+	__u64 dst_hva;
+	union{
+		__u32 data;
+		__u64 data_long;
+	};
 };
 
 struct virtib_create_cq {

@@ -162,17 +162,19 @@ out:
 uint32_t *vib_get_host_db_addr(struct mlx4_context *context, enum mlx4_db_type type, uint32_t *db)
 {
 	struct mlx4_db_page *page;
-	uintptr_t ps = to_mdev(context->ibv_ctx.device)->page_size;
+	uintptr_t page_filter = to_mdev(context->ibv_ctx.device)->page_size - 1;
+	uintptr_t guest_buf = (uintptr_t) db & ~page_filter;
+	uintptr_t db_offset = (uintptr_t) db & page_filter;
 	uint32_t *host_db = NULL;
 
 	for (page = context->db_list[type]; page; page = page->next)
-		if (((uintptr_t) db & ~(ps - 1)) == (uintptr_t) page->buf.buf)
+		if (guest_buf == (uintptr_t) page->buf.buf)
 			break;
 
 	if (!page)
 		goto out;
 
-	host_db = ((uintptr_t) db & (ps - 1)) + (uintptr_t) page->mlink.hva;
+	host_db = (uint32_t *) (page->mlink.hva + db_offset);
 
 out:
 	return host_db;

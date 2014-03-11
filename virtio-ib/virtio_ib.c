@@ -47,12 +47,6 @@ struct virtio_ib_event_file{
 	unsigned int              last_poll_status;
 };
 
-struct virtio_ib_mmap_info{
-	struct page              *page;
-	uint64_t                  offset;
-	struct virtio_ib_file    *file;
-};
-
 struct virtio_ib *vib_dev;
 
 static void virtib_event_poll_start(struct virtio_ib_event_file *file)
@@ -263,14 +257,15 @@ static int virtib_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+/* virtib device functions */
+
 static ssize_t virtib_device_find_sysfs(struct virtio_ib_file *file,
 		struct virtib_hdr_with_resp *hdr){
 	struct virtio_ib *vib = file->vib;
-	__s32 cmd = VIRTIB_DEVICE_FIND_SYSFS;
 	struct scatterlist sg[3];
 	int ret;
 
-	sg_init_one(&sg[0], &cmd, sizeof(cmd));
+	sg_init_one(&sg[0], &hdr->command, sizeof(hdr->command));
 	sg_init_one(&sg[1], &ret, sizeof(ret));
 	sg_init_one(&sg[2], file->out_buf, sizeof(file->out_buf));
 
@@ -291,43 +286,101 @@ static ssize_t virtib_device_find_sysfs(struct virtio_ib_file *file,
 	return ret;
 }
 
-static void __virtib_convert_address_to_guest_phys(unsigned long *addr){
-	struct page *pg;
-	get_user_pages_fast(*addr, 1, 1, &pg);
-	*addr = page_to_phys(pg);
-	page_cache_release(pg);
+static ssize_t virtib_device_mmap(struct virtio_ib_file *file,
+		struct virtib_device_mmap *cmd)
+{
+	struct virtio_ib *vib = file->vib;
+	struct scatterlist sg[4];
+	__u64 ret;
+
+	sg_init_one(&sg[0], &cmd->command, sizeof(cmd->command));
+	sg_init_one(&sg[1], &file->host_fd, sizeof(file->host_fd));
+	sg_init_one(&sg[2], &cmd->offset, sizeof(cmd->offset));
+	sg_init_one(&sg[3], &ret, sizeof(ret));
+
+	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 3, 1, file) < 0);
+
+	virtqueue_kick(vib->device_vq);
+	wait_for_completion(&file->acked);
+
+	if ((void *) ret == (void *) -1) {
+		printk(KERN_ERR "virtio-ib: virtib_device_mmap error\n");
+		return -EFAULT;
+	}
+
+	if (copy_to_user((void *) cmd->response, &ret, sizeof(ret))){
+		printk(KERN_ERR "virtio-ib: virtib_device_mmap response error\n");
+		return -EFAULT;
+	}
+
+	return sizeof(struct virtib_device_mmap);
 }
 
-static void virtib_convert_addresses_to_guest_phys(void *buf)
+static ssize_t virtib_device_munmap(struct virtio_ib_file *file,
+		struct virtib_device_munmap *cmd)
 {
-	struct ib_uverbs_cmd_hdr *hdr = buf;
-	if (hdr->command == IB_USER_VERBS_CMD_CREATE_CQ){
-		struct virtib_create_cq *cmd = buf;
-		down_read(&current->mm->mmap_sem);
-		__virtib_convert_address_to_guest_phys(
-				(long unsigned int *) &cmd->cmd.user_handle);
-		up_read(&current->mm->mmap_sem);
-	} else if (hdr->command == IB_USER_VERBS_CMD_RESIZE_CQ){
-		struct virtib_resize_cq *cmd = buf;
-		down_read(&current->mm->mmap_sem);
-		up_read(&current->mm->mmap_sem);
-	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_SRQ){
-		struct virtib_create_srq *cmd = buf;
-		down_read(&current->mm->mmap_sem);
-		__virtib_convert_address_to_guest_phys(
-				(long unsigned int *) &cmd->cmd.user_handle);
-		up_read(&current->mm->mmap_sem);
-	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_QP){
-		struct virtib_create_qp *cmd = buf;
-		down_read(&current->mm->mmap_sem);
-		__virtib_convert_address_to_guest_phys(
-				(long unsigned int *) &cmd->cmd.user_handle);
-		up_read(&current->mm->mmap_sem);
-	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_AH){
-		struct virtib_create_ah *cmd = buf;
-		down_read(&current->mm->mmap_sem);
-		up_read(&current->mm->mmap_sem);
+	struct virtio_ib *vib = file->vib;
+	struct scatterlist sg[3];
+	__s32 ret;
+
+	sg_init_one(&sg[0], &cmd->command, sizeof(cmd->command));
+	sg_init_one(&sg[1], &cmd->hva, sizeof(cmd->hva));
+	sg_init_one(&sg[2], &ret, sizeof(ret));
+
+	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 2, 1, file) < 0);
+
+	virtqueue_kick(vib->device_vq);
+	wait_for_completion(&file->acked);
+
+	if ((int) ret == -1) {
+		printk(KERN_ERR "virtio-ib: virtib_device_munmap error\n");
+		return -EFAULT;
 	}
+
+	return sizeof(struct virtib_device_munmap);
+}
+
+static ssize_t virtib_device_mcopy(struct virtio_ib_file *file,
+		struct virtib_device_mcopy *cmd)
+{
+	struct virtio_ib *vib = file->vib;
+	struct scatterlist sg[3];
+
+	/* borrowing second buffer */
+	if (cmd->bytecnt > IB_UVERBS_CMD_MAX_SIZE)
+		return -EFAULT;
+	if (copy_from_user(file->out_buf, &cmd->src_addr, cmd->bytecnt))
+		return -EFAULT;
+
+	sg_init_one(&sg[0], &cmd->command, sizeof(cmd->command));
+	sg_init_one(&sg[1], &cmd->dst_hva, sizeof(cmd->dst_hva));
+	sg_init_one(&sg[2], &file->out_buf, cmd->bytecnt);
+	sg_init_one(&sg[3], &cmd->bytecnt, sizeof(cmd->bytecnt));
+
+	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 4, 0, file) < 0);
+
+	virtqueue_kick(vib->device_vq);
+	wait_for_completion(&file->acked);
+
+	return sizeof(struct virtib_device_mcopy);
+}
+
+static ssize_t virtib_device_massign(struct virtio_ib_file *file,
+		struct virtib_device_massign *cmd)
+{
+	struct virtio_ib *vib = file->vib;
+	struct scatterlist sg[3];
+
+	sg_init_one(&sg[0], &cmd->command, sizeof(cmd->command));
+	sg_init_one(&sg[1], &cmd->dst_hva, sizeof(cmd->dst_hva));
+	sg_init_one(&sg[2], &cmd->data, sizeof(cmd->data));
+
+	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 3, 0, file) < 0);
+
+	virtqueue_kick(vib->device_vq);
+	wait_for_completion(&file->acked);
+
+	return sizeof(struct virtib_device_massign);
 }
 
 static void virtib_replace_guest_fd_to_host_fd(void *buf)
@@ -362,8 +415,16 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf,
 
 	if (hdr->command == VIRTIB_DEVICE_FIND_SYSFS)
 		return virtib_device_find_sysfs(file, hdr);
+	else if (hdr->command == VIRTIB_DEVICE_MMAP)
+		return virtib_device_mmap(file, (void *) hdr);
+	else if (hdr->command == VIRTIB_DEVICE_MUNMAP)
+		return virtib_device_munmap(file, (void *) hdr);
+	else if (hdr->command == VIRTIB_DEVICE_MCOPY)
+		return virtib_device_mcopy(file, (void *) hdr);
+	else if (hdr->command == VIRTIB_DEVICE_MASSIGN
+			|| hdr->command == VIRTIB_DEVICE_MASSIGN_LONG)
+		return virtib_device_massign(file, (void *) hdr);
 
-	virtib_convert_addresses_to_guest_phys((void *) file->in_buf);
 	virtib_replace_guest_fd_to_host_fd((void *) file->in_buf);
 
 	sg_init_one(&sg[0], &file->host_fd, sizeof(file->host_fd));
@@ -433,120 +494,12 @@ out:
 	return retsize;
 }
 
-void virtib_mmap_vma_open(struct vm_area_struct *vma)
-{
-	struct virtio_ib_mmap_info *mmap_info = vma->vm_private_data;
-	struct virtio_ib_file *file = mmap_info->file;
-	struct virtio_ib *vib = file->vib;
-	struct scatterlist sg[6];
-	__s32 cmd = VIRTIB_DEVICE_MMAP;
-	__u64 addr = (__u64) page_to_phys(mmap_info->page);
-	__u64 length = vma->vm_end - vma->vm_start;
-	__u64 offset = mmap_info->offset;
-	__u64 ret;
-
-	sg_init_one(&sg[0], &cmd, sizeof(cmd));
-	sg_init_one(&sg[1], &file->host_fd, sizeof(file->host_fd));
-	sg_init_one(&sg[2], &addr, sizeof(addr));
-	sg_init_one(&sg[3], &length, sizeof(length));
-	sg_init_one(&sg[4], &offset, sizeof(offset));
-	sg_init_one(&sg[5], &ret, sizeof(ret));
-
-	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 5, 1, file) < 0);
-
-	virtqueue_kick(vib->device_vq);
-	wait_for_completion(&file->acked);
-
-	if ((void *) ret == (void *) -1)
-		printk(KERN_ERR "virtio-ib: virtib_mmap_vma_open mmap error\n");
-
-	return;
-}
-
-void virtib_mmap_vma_close(struct vm_area_struct *vma)
-{
-	struct virtio_ib_mmap_info *mmap_info = vma->vm_private_data;
-	struct virtio_ib_file *file = mmap_info->file;
-	struct virtio_ib *vib = file->vib;
-	struct scatterlist sg[4];
-	__s32 cmd = VIRTIB_DEVICE_MUNMAP;
-	__u64 addr = (__u64) page_to_phys(mmap_info->page);
-	__u64 length = vma->vm_end - vma->vm_start;
-	__s32 ret;
-
-	sg_init_one(&sg[0], &cmd, sizeof(cmd));
-	sg_init_one(&sg[1], &addr, sizeof(addr));
-	sg_init_one(&sg[2], &length, sizeof(length));
-	sg_init_one(&sg[3], &ret, sizeof(ret));
-
-	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 3, 1, file) < 0);
-
-	virtqueue_kick(vib->device_vq);
-	wait_for_completion(&file->acked);
-
-	if ((int) ret == -1)
-		printk(KERN_ERR "virtio-ib: virtib_mmap_vma_open mmap error\n");
-
-	__free_page(mmap_info->page);
-	kfree(mmap_info);
-}
-
-struct vm_operations_struct virtib_mmap_vm_ops = {
-	.open  = virtib_mmap_vma_open,
-	.close = virtib_mmap_vma_close,
-};
-
-static int virtib_mmap(struct file *filp, struct vm_area_struct *vma)
-{
-	int err;
-	struct virtio_ib_mmap_info *mmap_info;
-
-	mmap_info = kmalloc(sizeof(struct virtio_ib_mmap_info), GFP_KERNEL);
-	if (mmap_info == NULL) {
-		err = -ENOMEM;
-		printk(KERN_ERR "virtib: mmap failed. cannot alloc mmap_info.\n");
-		goto exit;
-	}
-
-	mmap_info->page = alloc_page(GFP_KERNEL);
-	mmap_info->file = (struct virtio_ib_file *) filp->private_data;
-	mmap_info->offset = vma->vm_pgoff << PAGE_SHIFT;
-	vma->vm_private_data = mmap_info;
-	vma->vm_ops = &virtib_mmap_vm_ops;
-
-	if (mmap_info->page == NULL) {
-		err = -ENOMEM;
-		printk(KERN_ERR "virtib: mmap failed. cannot alloc dma page.\n");
-		goto alloc_mmap_info;
-	}
-
-	if (remap_pfn_range(vma, vma->vm_start,
-				page_to_pfn(mmap_info->page),
-				PAGE_SIZE, vma->vm_page_prot)) {
-		err = -EAGAIN;
-		printk(KERN_ERR "virtib: mmap failed. cannot map pfn.\n");
-		goto alloc_page;
-	}
-
-	virtib_mmap_vma_open(vma);
-
-	return 0;
-
-alloc_page:
-	__free_page(mmap_info->page);
-alloc_mmap_info:
-	kfree(mmap_info);
-exit:
-	return err;
-}
-
 struct file_operations virtib_fops = {
 	.owner   = THIS_MODULE,
 	.open    = virtib_open,
 	.release = virtib_release,
 	.read    = virtib_read,
 	.write   = virtib_write,
-	.mmap    = virtib_mmap,
 };
 
 static struct miscdevice virtib_misc = {

@@ -1185,15 +1185,46 @@ const char *ibv_port_state_str(enum ibv_port_state port_state);
 const char *ibv_event_type_str(enum ibv_event_type event);
 
 /**
- * 
+ * vib_cmd_reassemble_memory - Link memory to host
  */
 void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink);
 
-/*
- *
+/**
+ * vib_cmd_return_memory - Release memlink and restore paging
  */
 void vib_cmd_return_memory(struct vib_mlink *mlink);
 
+/**
+ * vib_cmd_mmap - mmap host memory
+ */
+void *vib_cmd_mmap(struct ibv_context *context, int32_t offset);
+
+/**
+ * vib_cmd_munmap - munmap mmap'd memory
+ */
+int vib_cmd_munmap(struct ibv_context *context, uint64_t hva);
+
+/**
+ * vib_cmd_mcopy - copy memory to host
+ */
+int vib_cmd_mcopy(struct ibv_context *context,
+		  uint64_t dst_hva,
+		  void *src_addr,
+		  size_t bytecnt);
+
+/**
+ * vib_cmd_massign - assign 4 byte memory to host
+ */
+int vib_cmd_massign(struct ibv_context *context,
+		    uint64_t dst_hva,
+		    uint32_t data);
+
+/**
+ * vib_cmd_massign_long - assign 8 byte memory to host
+ */
+int vib_cmd_massign_long(struct ibv_context *context,
+		    uint64_t dst_hva,
+		    uint64_t data);
 END_C_DECLS
 
 #  undef __attribute_const

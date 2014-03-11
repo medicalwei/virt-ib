@@ -415,8 +415,9 @@ out:
 
 		pthread_spin_lock(&ctx->bf_lock);
 
-		mlx4_bf_copy(ctx->bf_page + ctx->bf_offset, (unsigned long *) ctrl,
-			     align(size * 16, 64));
+		vib_cmd_mcopy(ibqp->context,
+			      (uint64_t) (ctx->bf_page + ctx->bf_offset),
+			      ctrl, align(size * 16, 64));
 		wc_wmb();
 
 		ctx->bf_offset ^= ctx->bf_buf_size;
@@ -431,7 +432,9 @@ out:
 		 */
 		wmb();
 
-		*(uint32_t *) (ctx->uar + MLX4_SEND_DOORBELL) = qp->doorbell_qpn;
+		vib_cmd_massign(ibqp->context,
+				(uint64_t) (ctx->uar + MLX4_SEND_DOORBELL),
+				qp->doorbell_qpn);
 	}
 
 	if (nreq)
