@@ -299,8 +299,8 @@ void *vib_search_buf(void* addr, struct ibv_context *context)
 	int    offset;
 
 	for (mtt = context->mtt; mtt; mtt = mtt->next){
-		offset = mtt->buf - addr;
-		if (offset > -1 && offset < mtt->length)
+		offset = addr - mtt->buf;
+		if (offset >= 0 && offset < mtt->length)
 			return (void*) (mtt->hva + offset);
 	}
 	

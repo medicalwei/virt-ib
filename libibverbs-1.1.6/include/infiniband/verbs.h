@@ -733,11 +733,11 @@ static inline unsigned long long vib_memory_translation(struct ibv_context *cont
         int    offset;
 
         for (mtt = context->mtt; mtt; mtt = mtt->next){
-                offset = (unsigned long long) mtt->buf - addr;
-                if (offset > -1 && offset < mtt->length)
+                offset = addr - (unsigned long long) mtt->buf;
+                if (offset >= 0 && offset < mtt->length)
                         return (unsigned long long) (mtt->hva + offset);
         }
-	/* printf("Cannot buf host virtaul address at %lx. Returning the addr instead.\n", addr); */
+	/* printf("libibverbs: vib_memory_translation failed to translate address at %lx.\n", addr); */
 	return addr;
 }
 
@@ -1070,13 +1070,10 @@ static inline int ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr,
 	struct ibv_send_wr *swr = NULL;
 
 	for (swr = wr; swr; swr = swr->next){
-		if(swr->send_flags & IBV_SEND_INLINE && swr->num_sge){
+		if (swr->send_flags & IBV_SEND_INLINE && swr->num_sge){
 			/* printf("SEND_INLINE data\n"); */
-		}
-		else{
+		} else {
 			swr->sg_list->addr = vib_memory_translation(qp->context, swr->sg_list->addr);
-			if (!swr->sg_list->addr)
-				return -1;
 		}
 	}
 
