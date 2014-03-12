@@ -315,10 +315,11 @@ int ibv_cmd_reg_mr(struct ibv_pd *pd, void *addr, size_t length,
 {
 	IBV_INIT_CMD_RESP(cmd, cmd_size, REG_MR, resp, resp_size);
 
+	cmd->start = NULL;
 	if (pd->context->mtt)
 		cmd->start = (uintptr_t) vib_search_buf(addr, pd->context);
 
-	if (!cmd->start){
+	if (!cmd->start) {
 		cmd->start = (uintptr_t) vib_cmd_reassemble_memory(addr, length, &mr->mlink);
 		vib_add_mtt(pd->context, addr, (void*) cmd->start, length);
 	}
