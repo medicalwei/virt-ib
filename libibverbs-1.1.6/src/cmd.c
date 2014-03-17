@@ -325,7 +325,8 @@ int ibv_cmd_reg_mr(struct ibv_pd *pd, void *addr, size_t length,
 	}
 
 	cmd->length 	  = length;
-	cmd->hca_va 	  = cmd->start;
+	/* cmd->hca_va 	  = cmd->start; */
+	cmd->hca_va 	  = cmd->hca_va;
 	cmd->pd_handle 	  = pd->handle;
 	cmd->access_flags = access;
 
