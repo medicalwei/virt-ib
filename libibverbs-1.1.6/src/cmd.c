@@ -55,12 +55,10 @@ void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink)
 	struct virtio_memlink_ioctl_input memlink_input;
 	int fd;
 
-	printf("vib_cmd_reassemble_memory\n");
 	mlock(ptr, size);
 
 	fd = open(MEMLINK_DEVICE_PATH, O_RDWR);
 	if (fd < 0){
-		printf("[vib_cmd_reassemble_memory] memlink open failed\n");
 		return NULL;
 	}
 
@@ -68,14 +66,12 @@ void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink)
         memlink_input.size = size;
 
 	if (ioctl(fd, MEMLINK_IOC_CREATE, &memlink_input) < 0) {
-		printf("[vib_cmd_reassemble_memory] send ptr failed\n");
 		return NULL;
 	}
 
 	mlink->fd  = fd;
 	mlink->hva = memlink_input.hva;
 
-	printf("addr:%p, fd:%d, hva:%p\n", ptr, fd, (void *) mlink->hva);
 	return (void*) mlink->hva;
 }
 

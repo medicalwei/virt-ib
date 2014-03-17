@@ -9,8 +9,6 @@
 #include <linux/pagemap.h>
 #include <asm/uaccess.h>
 
-#define DEBUG 1
-
 static int dev_major;
 static int dev_minor;
 struct cdev *dev_cdevp = NULL;
@@ -265,9 +263,6 @@ static void virtmemlink_remove(struct virtio_device *vdev)
 	vml->vdev->config->reset(vml->vdev);
 	vml->vdev->config->del_vqs(vml->vdev);
 	kfree(vml);
-#if DEBUG
-	printk(KERN_INFO "virtmemlink: removed\n");
-#endif
 }
 
 static unsigned int features[] = {};
@@ -286,9 +281,6 @@ static struct virtio_driver virtio_memlink_driver = {
 static int dev_open(struct inode *inode, struct file *filp)
 {
 	struct virtio_memlink_file * file;
-#if DEBUG
-	printk(KERN_INFO "dev_open\n");
-#endif
 	file = kmalloc(sizeof(struct virtio_memlink_file), GFP_KERNEL);
 	file->vml = vml_global;
 	init_completion(&file->acked);
@@ -300,9 +292,6 @@ static int dev_open(struct inode *inode, struct file *filp)
 static int dev_release(struct inode *inode, struct file *filp)
 {
 	struct virtio_memlink_file * file = filp->private_data;
-#if DEBUG
-	printk(KERN_INFO "dev_release\n");
-#endif
 	reset(file);
 	kfree(file);
 
@@ -365,10 +354,6 @@ static int init_ioctl(void)
 	dev_t dev;
 	int err;
 
-#if DEBUG
-	printk(KERN_INFO "virtmemlink: init_ioctl\n");
-#endif
-
 	err = alloc_chrdev_region(&dev, 0, 1, "memlink");
 	if (err < 0)
 		return err;
@@ -393,9 +378,6 @@ static int init_ioctl(void)
 		return -EFAULT;
 	}
 
-#if DEBUG
-	printk(KERN_INFO "virtmemlink: register chrdev(%d, %d)\n", dev_major, dev_minor);
-#endif
 	return 0;
 }
 
@@ -416,9 +398,6 @@ static int __init init(void)
 {
 	int err;
 
-#if DEBUG
-	printk(KERN_INFO "virtmemlink: init\n");
-#endif
 	err = init_ioctl();
 	if (err < 0){
 		return err;
@@ -428,9 +407,6 @@ static int __init init(void)
 
 static void __exit fini(void)
 {
-#if DEBUG
-	printk(KERN_INFO "virtmemlink: fini\n");
-#endif
 	fini_ioctl();
 	unregister_virtio_driver(&virtio_memlink_driver);
 }
