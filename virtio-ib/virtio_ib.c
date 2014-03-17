@@ -49,6 +49,7 @@ struct virtio_ib_event_file{
 	struct completion         acked;
 
 	unsigned int              last_poll_status;
+	unsigned int              is_polling;
 };
 
 struct virtio_ib *vib_dev;
@@ -61,6 +62,11 @@ static void virtib_event_poll_start(struct virtio_ib_event_file *file)
 
 	if(file->last_poll_status != 0)
 		goto out;
+
+	if(file->is_polling != 0)
+		goto out;
+
+	file->is_polling = 1;
 
 	sg_init_one(&sg[0], &file->host_fd, sizeof file->host_fd);
 	sg_init_one(&sg[1], &cmd, sizeof cmd);
@@ -85,8 +91,8 @@ static ssize_t virtib_event_read(struct file *filp, char __user *buf,
 	char out[16];
 	int ret;
 
-	/* clear read status */
-	file->last_poll_status = 0;
+	virtib_event_poll_start(file);
+	wait_for_completion(&file->acked);
 
 	sg_init_one(&sg[0], &file->host_fd, sizeof file->host_fd);
 	sg_init_one(&sg[1], &cmd, sizeof cmd);
@@ -97,6 +103,10 @@ static ssize_t virtib_event_read(struct file *filp, char __user *buf,
 	BUG_ON(virtqueue_add_buf(vib->event_vq, sg, 3, 2, file) < 0);
 	virtqueue_kick(vib->event_vq);
 	wait_for_completion(&file->acked);
+
+	/* clear read status */
+	file->last_poll_status = 0;
+
 	if (copy_to_user(buf, out, ret) > 0){
 		return -EINVAL;
 	}
@@ -113,7 +123,7 @@ static unsigned int virtib_event_poll(struct file *filp,
 	poll_wait(filp, &file->wait_queue, wait);
 
 	mask |= file->last_poll_status;
-	if(mask == 0)
+	if(mask == 0 && file->is_polling == 0)
 		virtib_event_poll_start(file);
 
 	return mask;
@@ -184,6 +194,7 @@ __s32 virtib_alloc_event_file(__s32 host_fd){
 	init_waitqueue_head(&ev_file->wait_queue);
 	ev_file->async_queue = NULL;
 	ev_file->last_poll_status = 0;
+	ev_file->is_polling = 1;
 	ev_file->vib = vib_dev;
 
 	fd_install(fd, filp);
@@ -553,6 +564,8 @@ static void virtib_event_cb(struct virtqueue *vq)
 
 	while((file = virtqueue_get_buf(vq, &len)) != 0){
 		complete(&file->acked);
+
+		file->is_polling = 0;
 		if (file->last_poll_status != 0){
 			wake_up_interruptible(&file->wait_queue);
 			kill_fasync(&file->async_queue, SIGIO, POLL_IN);
