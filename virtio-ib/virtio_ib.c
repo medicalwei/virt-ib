@@ -344,7 +344,7 @@ static ssize_t virtib_device_mcopy(struct virtio_ib_file *file,
 		struct virtib_device_mcopy *cmd)
 {
 	struct virtio_ib *vib = file->vib;
-	struct scatterlist sg[3];
+	struct scatterlist sg[4];
 
 	/* borrowing second buffer */
 	if (cmd->bytecnt > IB_UVERBS_CMD_MAX_SIZE)
@@ -373,7 +373,7 @@ static ssize_t virtib_device_massign(struct virtio_ib_file *file,
 
 	sg_init_one(&sg[0], &cmd->command, sizeof(cmd->command));
 	sg_init_one(&sg[1], &cmd->dst_hva, sizeof(cmd->dst_hva));
-	sg_init_one(&sg[2], &cmd->data, sizeof(cmd->data));
+	sg_init_one(&sg[2], &cmd->data_long, sizeof(cmd->data_long));
 
 	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 3, 0, file) < 0);
 
