@@ -32,7 +32,11 @@ struct virtio_ib{
 struct virtio_ib_file{
 	struct virtio_ib         *vib;
 	__s32                     host_fd;
-	struct completion         acked;
+
+	struct completion         write_acked;
+	struct completion         read_acked;
+	struct completion         device_acked;
+
 	char                      in_buf[IB_UVERBS_CMD_MAX_SIZE];
 	char                      out_buf[IB_UVERBS_CMD_MAX_SIZE];
 };
@@ -206,7 +210,10 @@ static int virtib_open(struct inode *inode, struct file *filp)
 	file = kmalloc(sizeof(struct virtio_ib_file), GFP_KERNEL);
 	filp->private_data = file;
 	vib = file->vib = vib_dev;
-	init_completion(&file->acked);
+
+	init_completion(&file->write_acked);
+	init_completion(&file->read_acked);
+	init_completion(&file->device_acked);
 
 	sg_init_one(&sg[0], &cmd, sizeof(cmd));
 	sg_init_one(&sg[1], &file->host_fd, sizeof(file->host_fd));
@@ -217,7 +224,7 @@ static int virtib_open(struct inode *inode, struct file *filp)
 	}
 
 	virtqueue_kick(vib->device_vq);
-	wait_for_completion(&file->acked);
+	wait_for_completion(&file->device_acked);
 
 	if ((int) file->host_fd == -1){
 		printk(KERN_ERR "virtio-ib: virtib_open close error\n");
@@ -246,7 +253,7 @@ static int virtib_release(struct inode *inode, struct file *filp)
 	}
 
 	virtqueue_kick(vib->device_vq);
-	wait_for_completion(&file->acked);
+	wait_for_completion(&file->device_acked);
 
 	if ((int) ret == -1)
 		printk(KERN_ERR "virtio-ib: virtib_release close error\n");
@@ -275,7 +282,7 @@ static ssize_t virtib_device_find_sysfs(struct virtio_ib_file *file,
 	}
 
 	virtqueue_kick(vib->device_vq);
-	wait_for_completion(&file->acked);
+	wait_for_completion(&file->device_acked);
 
 	if (copy_to_user((void *) hdr->response, file->out_buf,
 				hdr->out_words*4)){
@@ -301,7 +308,7 @@ static ssize_t virtib_device_mmap(struct virtio_ib_file *file,
 	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 3, 1, file) < 0);
 
 	virtqueue_kick(vib->device_vq);
-	wait_for_completion(&file->acked);
+	wait_for_completion(&file->device_acked);
 
 	if ((void *) ret == (void *) -1) {
 		printk(KERN_ERR "virtio-ib: virtib_device_mmap error\n");
@@ -330,7 +337,7 @@ static ssize_t virtib_device_munmap(struct virtio_ib_file *file,
 	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 2, 1, file) < 0);
 
 	virtqueue_kick(vib->device_vq);
-	wait_for_completion(&file->acked);
+	wait_for_completion(&file->device_acked);
 
 	if ((int) ret == -1) {
 		printk(KERN_ERR "virtio-ib: virtib_device_munmap error\n");
@@ -360,7 +367,7 @@ static ssize_t virtib_device_mcopy(struct virtio_ib_file *file,
 	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 4, 0, file) < 0);
 
 	virtqueue_kick(vib->device_vq);
-	wait_for_completion(&file->acked);
+	wait_for_completion(&file->device_acked);
 
 	return sizeof(struct virtib_device_mcopy);
 }
@@ -378,7 +385,7 @@ static ssize_t virtib_device_massign(struct virtio_ib_file *file,
 	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 3, 0, file) < 0);
 
 	virtqueue_kick(vib->device_vq);
-	wait_for_completion(&file->acked);
+	wait_for_completion(&file->device_acked);
 
 	return sizeof(struct virtib_device_massign);
 }
@@ -438,7 +445,7 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf,
 	}
 
 	virtqueue_kick(vib->write_vq);
-	wait_for_completion(&file->acked);
+	wait_for_completion(&file->write_acked);
 
 	if (hdr->command == IB_USER_VERBS_CMD_CREATE_COMP_CHANNEL){
 		struct ib_uverbs_create_comp_channel_resp *__resp =
@@ -483,7 +490,7 @@ static ssize_t virtib_read(struct file *filp, char __user *ubuf,
 	BUG_ON(virtqueue_add_buf(vib->read_vq, sg, 1, 2, file) < 0);
 
 	virtqueue_kick(vib->read_vq);
-	wait_for_completion(&file->acked);
+	wait_for_completion(&file->read_acked);
 
 	if (retsize < 0 || copy_to_user((void *) ubuf, file_buffer, retsize))
 		printk(KERN_ERR "virtio-ib: virtio_read copy to user failed\n");
@@ -508,13 +515,34 @@ static struct miscdevice virtib_misc = {
 	.fops  = &virtib_fops,
 };
 
-static void virtib_cb(struct virtqueue *vq)
+
+static void virtib_write_cb(struct virtqueue *vq)
 {
 	struct virtio_ib_file *file;
 	int len;
 
 	while((file = virtqueue_get_buf(vq, &len)) != 0){
-		complete(&file->acked);
+		complete(&file->write_acked);
+	}
+}
+
+static void virtib_read_cb(struct virtqueue *vq)
+{
+	struct virtio_ib_file *file;
+	int len;
+
+	while((file = virtqueue_get_buf(vq, &len)) != 0){
+		complete(&file->read_acked);
+	}
+}
+
+static void virtib_device_cb(struct virtqueue *vq)
+{
+	struct virtio_ib_file *file;
+	int len;
+
+	while((file = virtqueue_get_buf(vq, &len)) != 0){
+		complete(&file->device_acked);
 	}
 }
 
@@ -535,8 +563,8 @@ static void virtib_event_cb(struct virtqueue *vq)
 static int init_vq(struct virtio_ib *vib)
 {
 	struct virtqueue *vqs[4];
-	vq_callback_t *callbacks[] = {virtib_cb, virtib_cb, virtib_cb,
-	                              virtib_event_cb};
+	vq_callback_t *callbacks[] = {virtib_write_cb, virtib_read_cb,
+				      virtib_device_cb, virtib_event_cb};
 	const char *names[] = { "write", "read", "device", "event"};
 	int err = 0;
 
