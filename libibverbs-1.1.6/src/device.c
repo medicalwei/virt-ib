@@ -147,7 +147,6 @@ struct ibv_context *__ibv_open_device(struct ibv_device *device)
 
 	context->device = device;
 	context->cmd_fd = cmd_fd;
-	context->mtt    = NULL;
 	pthread_mutex_init(&context->mutex, NULL);
 
 	return context;

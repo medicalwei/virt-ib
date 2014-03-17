@@ -273,36 +273,6 @@ int ibv_cmd_dealloc_pd(struct ibv_pd *pd)
 	return 0;
 }
 
-void vib_add_mtt(struct ibv_context *context, void *addr, void* hva, int length)
-{
-	struct vib_mtt *mtt = NULL;
-	
-	mtt = malloc(sizeof(struct vib_mtt));
-	mtt->buf    = (void*) addr;
-	mtt->hva    = (void*) hva;
-	mtt->length = length;	
-
-	mtt->prev = NULL;
-	mtt->next = context->mtt;
-	context->mtt = mtt;
-	if (mtt->next)
-		mtt->next->prev = mtt;
-}
-
-void *vib_search_buf(void* addr, struct ibv_context *context)
-{
-	struct vib_mtt *mtt;
-	int    offset;
-
-	for (mtt = context->mtt; mtt; mtt = mtt->next){
-		offset = addr - mtt->buf;
-		if (offset >= 0 && offset < mtt->length)
-			return (void*) (mtt->hva + offset);
-	}
-	
-	return NULL;
-}
-
 int ibv_cmd_reg_mr(struct ibv_pd *pd, void *addr, size_t length,
 		   uint64_t hca_va, int access,
 		   struct ibv_mr *mr, struct ibv_reg_mr *cmd,
@@ -311,17 +281,8 @@ int ibv_cmd_reg_mr(struct ibv_pd *pd, void *addr, size_t length,
 {
 	IBV_INIT_CMD_RESP(cmd, cmd_size, REG_MR, resp, resp_size);
 
-	cmd->start = NULL;
-	if (pd->context->mtt)
-		cmd->start = (uintptr_t) vib_search_buf(addr, pd->context);
-
-	if (!cmd->start) {
-		cmd->start = (uintptr_t) vib_cmd_reassemble_memory(addr, length, &mr->mlink);
-		vib_add_mtt(pd->context, addr, (void*) cmd->start, length);
-	}
-
+	cmd->start 	  = (uintptr_t) vib_cmd_reassemble_memory(addr, length, &mr->mlink);
 	cmd->length 	  = length;
-	/* cmd->hca_va 	  = cmd->start; */
 	cmd->hca_va 	  = hca_va;
 	cmd->pd_handle 	  = pd->handle;
 	cmd->access_flags = access;
@@ -338,25 +299,6 @@ int ibv_cmd_reg_mr(struct ibv_pd *pd, void *addr, size_t length,
 
 	return 0;
 }
-void vib_free_mtt(struct ibv_mr *mr, unsigned long long addr)
-{
-	struct vib_mtt *mtt = NULL;
-
-	for (mtt = mr->context->mtt; mtt; mtt = mtt->next)
-		if (mtt->hva == (void *) addr)
-			break;
-	if (mtt){
-		if (mtt->prev)
-			mtt->prev->next = mtt->next;
-		else
-			mr->context->mtt = mtt->next;
-		if (mtt->next)
-			mtt->next->prev = mtt->prev;
-
-		vib_cmd_return_memory(&mr->mlink);
-		free(mtt);
-	}
-}
 
 int ibv_cmd_dereg_mr(struct ibv_mr *mr)
 {
@@ -368,7 +310,7 @@ int ibv_cmd_dereg_mr(struct ibv_mr *mr)
 	if (write(mr->context->cmd_fd, &cmd, sizeof cmd) != sizeof cmd)
 		return errno;
 
-	vib_free_mtt(mr, mr->mlink.hva);
+	vib_cmd_return_memory(&mr->mlink);
 
 	return 0;
 }

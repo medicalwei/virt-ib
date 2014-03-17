@@ -62,13 +62,6 @@ struct vib_mlink{
 	unsigned long long hva;	
 };
 
-struct vib_mtt{
-	struct vib_mtt *prev,*next;
-	void 	       *buf;
-	void 	       *hva;
-	int  	        length;
-};
-
 union ibv_gid {
 	uint8_t			raw[16];
 	struct {
@@ -721,7 +714,6 @@ struct ibv_context {
 	int			num_comp_vectors;
 	pthread_mutex_t		mutex;
 	void		       *abi_compat;
-	struct vib_mtt 	       *mtt;
 };
 
 /**
