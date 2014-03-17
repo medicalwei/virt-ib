@@ -721,25 +721,8 @@ struct ibv_context {
 	int			num_comp_vectors;
 	pthread_mutex_t		mutex;
 	void		       *abi_compat;
-	struct vib_mtt	       *mtt;
+	struct vib_mtt 	       *mtt;
 };
-
-/*
- *
- */
-static inline unsigned long long vib_memory_translation(struct ibv_context *context, unsigned long long addr)
-{
-	struct vib_mtt *mtt;
-        int    offset;
-
-        for (mtt = context->mtt; mtt; mtt = mtt->next){
-                offset = addr - (unsigned long long) mtt->buf;
-                if (offset >= 0 && offset < mtt->length)
-                        return (unsigned long long) (mtt->hva + offset);
-        }
-	/* printf("libibverbs: vib_memory_translation failed to translate address at %lx.\n", addr); */
-	return addr;
-}
 
 /**
  * ibv_get_device_list - Get list of IB devices currently available
@@ -1015,14 +998,6 @@ static inline int ibv_post_srq_recv(struct ibv_srq *srq,
 				    struct ibv_recv_wr *recv_wr,
 				    struct ibv_recv_wr **bad_recv_wr)
 {
-	struct ibv_recv_wr *rwr = NULL;
-	
-	for (rwr = recv_wr; rwr; rwr = rwr->next){
-		rwr->sg_list->addr = vib_memory_translation(srq->context, rwr->sg_list->addr);
-		if (!rwr->sg_list->addr)
-			return -1;
-	}
-	
 	return srq->context->ops.post_srq_recv(srq, recv_wr, bad_recv_wr);
 }
 
@@ -1067,8 +1042,6 @@ int ibv_destroy_qp(struct ibv_qp *qp);
 static inline int ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr,
 				struct ibv_send_wr **bad_wr)
 {
-	struct ibv_send_wr *swr = NULL;
-
 	return qp->context->ops.post_send(qp, wr, bad_wr);
 }
 
@@ -1078,8 +1051,6 @@ static inline int ibv_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr,
 static inline int ibv_post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr,
 				struct ibv_recv_wr **bad_wr)
 {
-	struct ibv_recv_wr *rwr = NULL;
-
 	return qp->context->ops.post_recv(qp, wr, bad_wr);
 }
 
