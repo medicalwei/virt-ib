@@ -322,8 +322,6 @@ static int dev_ioctl(struct inode *inode, struct file *filp,
 			ret = create(file, &input);
 			if (ret < 0){
 				printk(KERN_ERR "%s: memlink failed to create.\n", __FUNCTION__);
-			} else {
-				printk(KERN_ERR "%s: memlink hva: %llx, size: %d\n", __FUNCTION__, input.hva, input.size);
 			}
 
 			ret = copy_to_user((void *)args, &input, sizeof(struct virtio_memlink_ioctl_input));
@@ -332,7 +330,6 @@ static int dev_ioctl(struct inode *inode, struct file *filp,
 		case MEMLINK_IOC_REVOKE:
 			// TODO: debug
 			revoke_id = (int)args;
-			printk(KERN_ERR "%s: revoking %d\n", __FUNCTION__, revoke_id);
 			revoke(file, revoke_id);
 			break;
 
