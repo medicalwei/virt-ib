@@ -16,6 +16,7 @@
 #include <linux/anon_inodes.h>
 #include <linux/pagemap.h>
 #include <linux/fdtable.h>
+#include <linux/spinlock.h>
 #include <rdma/ib_user_verbs.h>
 
 #define IB_UVERBS_CMD_MAX_SIZE 16384
@@ -27,6 +28,8 @@ struct virtio_ib{
 	struct virtqueue         *read_vq;
 	struct virtqueue         *device_vq;
 	struct virtqueue         *event_vq;
+
+	spinlock_t	 	  write_lock;
 };
 
 struct virtio_ib_file{
@@ -428,20 +431,29 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf,
 	struct scatterlist sg[4];
 	int ret = 0;
 
-	if (copy_from_user(file->in_buf, buf, len))
-		return -EFAULT;
+	spin_lock(&vib_dev->write_lock);
+	if (copy_from_user(file->in_buf, buf, len)) {
+		ret = -EFAULT;
+		goto unlock;
+	}
 
-	if (hdr->command == VIRTIB_DEVICE_FIND_SYSFS)
-		return virtib_device_find_sysfs(file, hdr);
-	else if (hdr->command == VIRTIB_DEVICE_MMAP)
-		return virtib_device_mmap(file, (void *) hdr);
-	else if (hdr->command == VIRTIB_DEVICE_MUNMAP)
-		return virtib_device_munmap(file, (void *) hdr);
-	else if (hdr->command == VIRTIB_DEVICE_MCOPY)
-		return virtib_device_mcopy(file, (void *) hdr);
-	else if (hdr->command == VIRTIB_DEVICE_MASSIGN
-			|| hdr->command == VIRTIB_DEVICE_MASSIGN_LONG)
-		return virtib_device_massign(file, (void *) hdr);
+	if (hdr->command == VIRTIB_DEVICE_FIND_SYSFS) {
+		ret = virtib_device_find_sysfs(file, hdr);
+		goto unlock;
+	} else if (hdr->command == VIRTIB_DEVICE_MMAP) {
+		ret = virtib_device_mmap(file, (void *) hdr);
+		goto unlock;
+	} else if (hdr->command == VIRTIB_DEVICE_MUNMAP) {
+		ret = virtib_device_munmap(file, (void *) hdr);
+		goto unlock;
+	} else if (hdr->command == VIRTIB_DEVICE_MCOPY) {
+		ret = virtib_device_mcopy(file, (void *) hdr);
+		goto unlock;
+	} else if (hdr->command == VIRTIB_DEVICE_MASSIGN
+			|| hdr->command == VIRTIB_DEVICE_MASSIGN_LONG) {
+		ret = virtib_device_massign(file, (void *) hdr);
+		goto unlock;
+	}
 
 	virtib_replace_guest_fd_to_host_fd((void *) file->in_buf);
 
@@ -452,7 +464,8 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf,
 
 	if(virtqueue_add_buf(vib->write_vq, sg, 2, 2, file) < 0) {
 		printk(KERN_ERR "virtio-ib: virtib_write add_buf error\n");
-		return -EFAULT;
+		ret = -EFAULT;
+		goto unlock;
 	}
 
 	virtqueue_kick(vib->write_vq);
@@ -472,8 +485,11 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf,
 			copy_to_user((void *) hdr->response,
 				file->out_buf, hdr->out_words*4)){
 		printk(KERN_ERR "virtio-ib: virtib_write response error\n");
-		return -EFAULT;
+		ret = -EFAULT;
 	}
+
+unlock:
+	spin_unlock(&vib_dev->write_lock);
 
 	return ret;
 }
@@ -620,6 +636,8 @@ static int virtib_probe(struct virtio_device *vdev)
 		printk(KERN_ERR "virtib: failed to register misc device.");
 		goto err_init_vq;
 	}
+
+	spin_lock_init(&vib->write_lock);
 
 	return 0;
 
