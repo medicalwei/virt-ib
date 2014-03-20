@@ -314,6 +314,7 @@ static struct pingpong_context *pp_init_ctx(struct ibv_device *ib_dev, int size,
 					    int use_event)
 {
 	struct pingpong_context *ctx;
+	struct timeval start, end;
 
 	ctx = calloc(1, sizeof *ctx);
 	if (!ctx)
@@ -353,10 +354,18 @@ static struct pingpong_context *pp_init_ctx(struct ibv_device *ib_dev, int size,
 		return NULL;
 	}
 
+	gettimeofday(&start, NULL);
 	ctx->mr = ibv_reg_mr(ctx->pd, ctx->buf, size, IBV_ACCESS_LOCAL_WRITE);
 	if (!ctx->mr) {
 		fprintf(stderr, "Couldn't register MR\n");
 		return NULL;
+	}
+	gettimeofday(&end, NULL);
+	{
+		unsigned int usec = (end.tv_sec - start.tv_sec) * 1000000 +
+			(end.tv_usec - start.tv_usec);
+		printf("ibv_reg_mr: %lld bytes in %u us\n",
+		       size, usec);
 	}
 
 	ctx->cq = ibv_create_cq(ctx->context, rx_depth + 1, NULL,
@@ -777,7 +786,6 @@ int main(int argc, char *argv[])
 
 				case PINGPONG_RECV_WRID:
 					if (--routs <= 1) {
-						printf("post recv\n");
 						routs += pp_post_recv(ctx, ctx->rx_depth - routs);
 						if (routs < ctx->rx_depth) {
 							fprintf(stderr,
@@ -798,7 +806,6 @@ int main(int argc, char *argv[])
 
 				ctx->pending &= ~(int) wc[i].wr_id;
 				if (scnt < iters && !ctx->pending) {
-					printf("post send\n");
 					if (pp_post_send(ctx)) {
 						fprintf(stderr, "Couldn't post send\n");
 						return 1;
