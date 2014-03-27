@@ -721,7 +721,6 @@ int main(int argc, char *argv[])
 	ctx->pending = PINGPONG_RECV_WRID;
 
 	if (servername) {
-		printf("first post send\n");
 		if (pp_post_send(ctx)) {
 			fprintf(stderr, "Couldn't post send\n");
 			return 1;
