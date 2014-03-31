@@ -55,6 +55,12 @@ struct virtio_ib_event_file{
 	unsigned int              is_polling;
 };
 
+struct virtio_ib_mmap_struct{
+	struct virtio_ib_file    *file;
+	unsigned long             page;
+	__u32                     offset;
+};
+
 struct virtio_ib *vib_dev;
 
 static void virtib_event_poll_start(struct virtio_ib_event_file *file)
@@ -307,101 +313,74 @@ static ssize_t virtib_device_find_sysfs(struct virtio_ib_file *file,
 	return ret;
 }
 
-static ssize_t virtib_device_mmap(struct virtio_ib_file *file,
-		struct virtib_device_mmap *cmd)
+static void virtib_device_mmap(struct vm_area_struct *vma)
 {
+	struct virtio_ib_mmap_struct *priv = vma->vm_private_data;
+	struct virtio_ib_file *file = priv->file;
 	struct virtio_ib *vib = file->vib;
 	struct scatterlist sg[4];
-	__u64 ret;
+	__s32 cmd = VIRTIB_DEVICE_MMAP;
 
-	sg_init_one(&sg[0], &cmd->command, sizeof(cmd->command));
+	sg_init_one(&sg[0], &cmd, sizeof(cmd));
 	sg_init_one(&sg[1], &file->host_fd, sizeof(file->host_fd));
-	sg_init_one(&sg[2], &cmd->offset, sizeof(cmd->offset));
-	sg_init_one(&sg[3], &ret, sizeof(ret));
-
-	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 3, 1, file) < 0);
-
-	virtqueue_kick(vib->device_vq);
-	wait_for_completion(&file->device_acked);
-
-	if ((void *) ret == (void *) -1) {
-		printk(KERN_ERR "virtio-ib: virtib_device_mmap error\n");
-		return -EFAULT;
-	}
-
-	if (copy_to_user((void *) cmd->response, &ret, sizeof(ret))){
-		printk(KERN_ERR "virtio-ib: virtib_device_mmap response error\n");
-		return -EFAULT;
-	}
-
-	return sizeof(struct virtib_device_mmap);
-}
-
-static ssize_t virtib_device_munmap(struct virtio_ib_file *file,
-		struct virtib_device_munmap *cmd)
-{
-	struct virtio_ib *vib = file->vib;
-	struct scatterlist sg[3];
-	__s32 ret;
-
-	sg_init_one(&sg[0], &cmd->command, sizeof(cmd->command));
-	sg_init_one(&sg[1], &cmd->hva, sizeof(cmd->hva));
-	sg_init_one(&sg[2], &ret, sizeof(ret));
-
-	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 2, 1, file) < 0);
-
-	virtqueue_kick(vib->device_vq);
-	wait_for_completion(&file->device_acked);
-
-	if ((int) ret == -1) {
-		printk(KERN_ERR "virtio-ib: virtib_device_munmap error\n");
-		return -EFAULT;
-	}
-
-	return sizeof(struct virtib_device_munmap);
-}
-
-static ssize_t virtib_device_mcopy(struct virtio_ib_file *file,
-		struct virtib_device_mcopy *cmd)
-{
-	struct virtio_ib *vib = file->vib;
-	struct scatterlist sg[4];
-
-	/* borrowing second buffer */
-	if (cmd->bytecnt > IB_UVERBS_CMD_MAX_SIZE)
-		return -EFAULT;
-	if (copy_from_user(file->out_buf, &cmd->src_addr, cmd->bytecnt))
-		return -EFAULT;
-
-	sg_init_one(&sg[0], &cmd->command, sizeof(cmd->command));
-	sg_init_one(&sg[1], &cmd->dst_hva, sizeof(cmd->dst_hva));
-	sg_init_one(&sg[2], &file->out_buf, cmd->bytecnt);
-	sg_init_one(&sg[3], &cmd->bytecnt, sizeof(cmd->bytecnt));
+	sg_init_one(&sg[2], &priv->offset, sizeof(priv->offset));
+	sg_init_one(&sg[3], &priv->page, sizeof(priv->page));
 
 	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 4, 0, file) < 0);
 
 	virtqueue_kick(vib->device_vq);
 	wait_for_completion(&file->device_acked);
-
-	return sizeof(struct virtib_device_mcopy);
 }
 
-static ssize_t virtib_device_massign(struct virtio_ib_file *file,
-		struct virtib_device_massign *cmd)
+static void virtib_device_munmap(struct vm_area_struct *vma)
 {
+	struct virtio_ib_mmap_struct *priv = vma->vm_private_data;
+	struct virtio_ib_file *file = priv->file;
 	struct virtio_ib *vib = file->vib;
-	struct scatterlist sg[3];
+	struct scatterlist sg[2];
+	__s32 cmd = VIRTIB_DEVICE_MUNMAP;
 
-	sg_init_one(&sg[0], &cmd->command, sizeof(cmd->command));
-	sg_init_one(&sg[1], &cmd->dst_hva, sizeof(cmd->dst_hva));
-	sg_init_one(&sg[2], &cmd->data_long, sizeof(cmd->data_long));
+	sg_init_one(&sg[0], &cmd, sizeof(cmd));
+	sg_init_one(&sg[1], &priv->page, sizeof(priv->page));
 
-	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 3, 0, file) < 0);
+	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 2, 0, file) < 0);
 
 	virtqueue_kick(vib->device_vq);
 	wait_for_completion(&file->device_acked);
 
-	return sizeof(struct virtib_device_massign);
+	free_page((unsigned long) __va(priv->page));
+	kfree(priv);
+}
+
+static struct vm_operations_struct virtib_mmap_vm_ops = {
+	.open  = virtib_device_mmap,
+	.close = virtib_device_munmap,
+};
+
+static int virtib_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+	struct virtio_ib_mmap_struct *priv =
+		kmalloc(sizeof(struct virtio_ib_mmap_struct), GFP_KERNEL);
+	unsigned long page = __get_free_page(GFP_KERNEL);
+
+	vma->vm_private_data = (void *) priv;
+
+	priv->file = filp->private_data;
+	priv->page = __pa(page);
+	priv->offset = vma->vm_pgoff << PAGE_SHIFT;
+	vma->vm_pgoff = __pa(page) >> PAGE_SHIFT;
+
+	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
+				vma->vm_end - vma->vm_start,
+				vma->vm_page_prot)) {
+		free_page(page);
+		kfree(priv);
+		return -EAGAIN;
+	}
+
+	vma->vm_ops = &virtib_mmap_vm_ops;
+	virtib_device_mmap(vma);
+	return 0;
 }
 
 static void virtib_replace_guest_fd_to_host_fd(void *buf)
@@ -439,19 +418,6 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf,
 
 	if (hdr->command == VIRTIB_DEVICE_FIND_SYSFS) {
 		ret = virtib_device_find_sysfs(file, hdr);
-		goto unlock;
-	} else if (hdr->command == VIRTIB_DEVICE_MMAP) {
-		ret = virtib_device_mmap(file, (void *) hdr);
-		goto unlock;
-	} else if (hdr->command == VIRTIB_DEVICE_MUNMAP) {
-		ret = virtib_device_munmap(file, (void *) hdr);
-		goto unlock;
-	} else if (hdr->command == VIRTIB_DEVICE_MCOPY) {
-		ret = virtib_device_mcopy(file, (void *) hdr);
-		goto unlock;
-	} else if (hdr->command == VIRTIB_DEVICE_MASSIGN
-			|| hdr->command == VIRTIB_DEVICE_MASSIGN_LONG) {
-		ret = virtib_device_massign(file, (void *) hdr);
 		goto unlock;
 	}
 
@@ -534,6 +500,7 @@ struct file_operations virtib_fops = {
 	.release = virtib_release,
 	.read    = virtib_read,
 	.write   = virtib_write,
+	.mmap    = virtib_mmap,
 };
 
 static struct miscdevice virtib_misc = {

@@ -367,7 +367,7 @@ int mlx4_arm_cq(struct ibv_cq *ibvcq, int solicited)
 	doorbell[0] = htonl(sn << 28 | cmd | cq->cqn);
 	doorbell[1] = htonl(ci);
 
-	vib_write64(doorbell, ibvcq->context, MLX4_CQ_DOORBELL);
+	mlx4_write64(doorbell, ibvcq->context, MLX4_CQ_DOORBELL);
 
 	return 0;
 }
