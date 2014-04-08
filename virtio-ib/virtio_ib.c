@@ -164,6 +164,9 @@ static int virtib_event_close(struct inode *inode, struct file *filp)
 	wait_for_completion(&file->acked);
 
 	kfree(file);
+
+	module_put(THIS_MODULE);
+
 	return 0;
 }
 
@@ -207,6 +210,8 @@ __s32 virtib_alloc_event_file(__s32 host_fd){
 	ev_file->vib = vib_dev;
 
 	fd_install(fd, filp);
+
+	try_module_get(THIS_MODULE);
 
 	return fd;
 
@@ -261,8 +266,6 @@ static int virtib_release(struct inode *inode, struct file *filp)
 	__s32 cmd = VIRTIB_DEVICE_CLOSE;
 	__s32 ret;
 
-	module_put(THIS_MODULE);
-
 	sg_init_one(&sg[0], &cmd, sizeof(cmd));
 	sg_init_one(&sg[1], &file->host_fd, sizeof(file->host_fd));
 	sg_init_one(&sg[2], &ret, sizeof(ret));
@@ -279,6 +282,7 @@ static int virtib_release(struct inode *inode, struct file *filp)
 		printk(KERN_ERR "virtio-ib: virtib_release close error\n");
 
 	kfree(file);
+
 	module_put(THIS_MODULE);
 
 	return 0;
