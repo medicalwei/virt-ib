@@ -570,7 +570,7 @@ static int init_vq(struct virtio_ib *vib)
 
 	err = vib->vdev->config->find_vqs(vib->vdev, 4, vqs, callbacks, names);
 	if (err){
-		printk(KERN_ERR "virtib: virtqueue initial failed\n");
+		printk(KERN_ERR "virtib: virtqueue initialize failed\n");
 		return err;
 	}
 
@@ -598,13 +598,13 @@ static int virtib_probe(struct virtio_device *vdev)
 
 	err = init_vq(vib);
 	if (err) {
-		printk(KERN_ERR "virtib: failed to initialize virtio.");
+		printk(KERN_ERR "virtib: failed to initialize virtio.\n");
 		goto err_init_vq;
 	}
 
 	err = misc_register(&virtib_misc);
 	if (err) {
-		printk(KERN_ERR "virtib: failed to register misc device.");
+		printk(KERN_ERR "virtib: failed to register misc device.\n");
 		goto err_init_vq;
 	}
 
