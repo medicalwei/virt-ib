@@ -70,6 +70,7 @@ struct mlx4_create_cq {
 	struct ibv_create_cq		ibv_cmd;
 	__u64				buf_addr;
 	__u64				db_addr;
+	__u64				buf_size;
 };
 
 struct mlx4_create_cq_resp {
@@ -81,12 +82,14 @@ struct mlx4_create_cq_resp {
 struct mlx4_resize_cq {
 	struct ibv_resize_cq		ibv_cmd;
 	__u64				buf_addr;
+	__u64				buf_size;
 };
 
 struct mlx4_create_srq {
 	struct ibv_create_srq		ibv_cmd;
 	__u64				buf_addr;
 	__u64				db_addr;
+	__u64				buf_size;
 };
 
 struct mlx4_create_srq_resp {
@@ -103,6 +106,7 @@ struct mlx4_create_qp {
 	__u8				log_sq_stride;
 	__u8				sq_no_prefetch;	/* was reserved in ABI 2 */
 	__u8				reserved[5];
+	__u64				buf_size;
 };
 
 #endif /* MLX4_ABI_H */

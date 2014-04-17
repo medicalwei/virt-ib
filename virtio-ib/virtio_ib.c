@@ -17,6 +17,7 @@
 #include <linux/pagemap.h>
 #include <linux/fdtable.h>
 #include <linux/spinlock.h>
+#include <linux/radix-tree.h>
 #include <rdma/ib_user_verbs.h>
 
 #define IB_UVERBS_CMD_MAX_SIZE 16384
@@ -30,6 +31,18 @@ struct virtio_ib{
 	struct virtqueue         *event_vq;
 
 	spinlock_t	 	  write_lock;
+
+	struct radix_tree_root    cq_memlinks;
+	struct radix_tree_root    qp_memlinks;
+	struct radix_tree_root    srq_memlinks;
+	struct radix_tree_root    mr_memlinks;
+};
+
+struct virtio_ib_memlink{
+	struct page             **pages;
+	unsigned int              num_pfns;
+	size_t                    sizeof_pfns;
+	uint32_t                 *pfns;
 };
 
 struct virtio_ib_file{
@@ -59,6 +72,15 @@ struct virtio_ib_mmap_struct{
 	struct virtio_ib_file    *file;
 	unsigned long             page;
 	__u32                     offset;
+};
+
+struct virtio_ib_queue_memlink{
+	struct virtio_ib_memlink *buf_ml,
+				 *db_ml;
+};
+
+struct virtio_ib_mr_memlink{
+	struct virtio_ib_memlink *ml;
 };
 
 struct virtio_ib *vib_dev;
@@ -387,11 +409,11 @@ static int virtib_mmap(struct file *filp, struct vm_area_struct *vma)
 	return 0;
 }
 
-static void virtib_replace_guest_fd_to_host_fd(void *buf)
+static void virtib_replace_guest_fd_to_host_fd(
+		struct virtib_hdr_with_resp *hdr)
 {
-	struct ib_uverbs_cmd_hdr *hdr = buf;
 	if (hdr->command == IB_USER_VERBS_CMD_CREATE_CQ) {
-		struct virtib_create_cq *s = (void *) buf;
+		struct virtib_create_cq *s = (void *) hdr;
 		struct file *filp; struct virtio_ib_event_file *file;
 		if (s->cmd.comp_channel != -1) {
 			rcu_read_lock();
@@ -405,16 +427,247 @@ static void virtib_replace_guest_fd_to_host_fd(void *buf)
 	}
 }
 
+static struct virtio_ib_memlink *virtib_get_pages(
+		unsigned long addr,
+		size_t size)
+{
+	int err, i;
+	struct virtio_ib_memlink *ml;
+	unsigned long start_addr, end_addr;
+	unsigned int num_pfns;
+
+	start_addr = PAGE_ALIGN(addr);
+	end_addr = addr + size;
+	if ((end_addr & (PAGE_SIZE-1)) != 0)
+		end_addr = (end_addr & ~(PAGE_SIZE-1)) + PAGE_SIZE;
+	num_pfns = (end_addr - start_addr) >> PAGE_SHIFT;
+
+	if (!access_ok(VERIFY_WRITE, start_addr, num_pfns)) {
+		printk(KERN_ERR "virtmemlink: not a valid address\n");
+		err = -EFAULT;
+		goto reterr;
+	}
+
+	ml = kmalloc(sizeof(struct virtio_ib_memlink), GFP_KERNEL);
+	if (ml == NULL) {
+		err = -ENOMEM;
+		goto reterr;
+	}
+
+	ml->num_pfns = num_pfns;
+	ml->sizeof_pfns = sizeof(*ml->pfns)*num_pfns;
+	ml->pfns = (uint32_t *)
+		   kmalloc(ml->sizeof_pfns, GFP_KERNEL);
+	if (ml->pfns == NULL) {
+		err = -ENOMEM;
+		goto free_ml;
+	}
+	ml->pages = (struct page **)
+		    kmalloc(sizeof(*ml->pages)*num_pfns, GFP_KERNEL);
+	if (ml->pages == NULL) {
+		err = -ENOMEM;
+		goto free_pages;
+	}
+
+	down_write(&current->mm->mmap_sem);
+	err = get_user_pages_fast(start_addr, num_pfns, 1, ml->pages);
+	up_write(&current->mm->mmap_sem);
+
+	if (err <= 0)
+		goto free_pfns;
+
+	for (i=0; i<num_pfns; i++)
+		ml->pfns[i] = page_to_pfn(ml->pages[i]);
+
+	return ml;
+
+free_pfns:
+	kfree(ml->pfns);
+free_pages:
+	kfree(ml->pages);
+free_ml:
+	kfree(ml);
+reterr:
+	return 0;
+}
+
+static void virtib_put_pages(struct virtio_ib_memlink *ml)
+{
+	int i;
+
+	if (ml == NULL)
+		return;
+
+	for(i=0; i<ml->num_pfns; i++){
+		set_page_dirty_lock(ml->pages[i]);
+		page_cache_release(ml->pages[i]);
+	}
+
+	/* free memory */
+	kfree(ml->pages);
+	kfree(ml->pfns);
+	kfree(ml);
+}
+
+static void *virtib_memlink_before_send(
+		struct virtib_hdr_with_resp *hdr, struct scatterlist *sg)
+{
+	const struct virtib_create_cq  *cmd_create_cq  = (void *) hdr;
+	const struct virtib_resize_cq  *cmd_resize_cq  = (void *) hdr;
+	const struct virtib_create_srq *cmd_create_srq = (void *) hdr;
+	const struct virtib_create_qp  *cmd_create_qp  = (void *) hdr;
+	const struct ib_uverbs_reg_mr  *cmd_reg_mr     = (void *) hdr;
+
+	struct virtio_ib_queue_memlink *qml;
+	struct virtio_ib_mr_memlink *mrml;
+	void * ret = NULL;
+
+	if (hdr->command == IB_USER_VERBS_CMD_CREATE_CQ){
+		ret = qml = (void *) kmalloc(
+				sizeof(struct virtio_ib_queue_memlink),
+				GFP_KERNEL);
+		qml->buf_ml = virtib_get_pages(cmd_create_cq->buf_addr,
+				 cmd_create_cq->buf_size);
+		qml->db_ml  = virtib_get_pages(cmd_create_cq->db_addr,
+				 PAGE_SIZE);
+		sg_init_one(&sg[0], qml->buf_ml->pfns,
+				qml->buf_ml->sizeof_pfns);
+		sg_init_one(&sg[1], qml->db_ml->pfns,
+				qml->db_ml->sizeof_pfns);
+	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_QP){
+		ret = qml = (void *) kmalloc(
+				sizeof(struct virtio_ib_queue_memlink),
+				GFP_KERNEL);
+		qml->buf_ml = virtib_get_pages(cmd_create_qp->buf_addr,
+			         cmd_create_qp->buf_size);
+		sg_init_one(&sg[0], qml->buf_ml->pfns,
+				qml->buf_ml->sizeof_pfns);
+		if (cmd_create_qp->db_addr != 0) {
+			qml->db_ml = virtib_get_pages(cmd_create_qp->db_addr,
+					PAGE_SIZE);
+			sg_init_one(&sg[1], qml->db_ml->pfns,
+					qml->db_ml->sizeof_pfns);
+		} else {
+			qml->db_ml = NULL;
+		}
+	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_SRQ){
+		ret = qml = (void *) kmalloc(
+				sizeof(struct virtio_ib_queue_memlink),
+				GFP_KERNEL);
+		qml->buf_ml = virtib_get_pages(cmd_create_srq->buf_addr,
+			         cmd_create_srq->buf_size);
+		qml->db_ml  = virtib_get_pages(cmd_create_srq->db_addr,
+				 PAGE_SIZE);
+		sg_init_one(&sg[0], qml->buf_ml->pfns,
+				qml->buf_ml->sizeof_pfns);
+		sg_init_one(&sg[1], qml->db_ml->pfns,
+				qml->db_ml->sizeof_pfns);
+	} else if (hdr->command == IB_USER_VERBS_CMD_REG_MR){
+		ret = mrml = (void *) kmalloc(
+				sizeof(struct virtio_ib_mr_memlink),
+				GFP_KERNEL);
+		mrml->ml = virtib_get_pages(cmd_reg_mr->start,
+			         cmd_reg_mr->length);
+		sg_init_one(&sg[0], mrml->ml->pfns,
+				mrml->ml->sizeof_pfns);
+	} else if (hdr->command == IB_USER_VERBS_CMD_RESIZE_CQ){
+		ret = qml = (void *) kmalloc(
+				sizeof(struct virtio_ib_queue_memlink),
+				GFP_KERNEL);
+		qml->buf_ml = virtib_get_pages(cmd_resize_cq->buf_addr,
+			         cmd_resize_cq->buf_size);
+		sg_init_one(&sg[0], qml->buf_ml->pfns,
+				qml->buf_ml->sizeof_pfns);
+	}
+	return ret;
+}
+
+static void virtib_memlink_after_send(struct virtio_ib *vib,
+		void *cmd, void *resp, void *ml)
+{
+	const struct virtib_hdr_with_resp      *hdr                 = cmd;
+	const struct ib_uverbs_destroy_cq      *cmd_destroy_cq      = cmd;
+	const struct ib_uverbs_destroy_srq     *cmd_destroy_srq     = cmd;
+	const struct ib_uverbs_destroy_qp      *cmd_destroy_qp      = cmd;
+	const struct ib_uverbs_dereg_mr        *cmd_dereg_mr        = cmd;
+	const struct ib_uverbs_create_cq_resp  *cmd_create_cq_resp  = resp;
+	const struct ib_uverbs_create_srq_resp *cmd_create_srq_resp = resp;
+	const struct ib_uverbs_create_qp_resp  *cmd_create_qp_resp  = resp;
+	const struct ib_uverbs_reg_mr_resp     *cmd_reg_mr          = resp;
+	const struct ib_uverbs_resize_cq       *cmd_resize_cq       = cmd;
+
+	const struct virtio_ib_queue_memlink *qml_resize = ml;
+	struct virtio_ib_queue_memlink *qml;
+	struct virtio_ib_mr_memlink *mrml;
+
+	if (hdr->command == IB_USER_VERBS_CMD_DESTROY_CQ){
+		qml = radix_tree_delete(&vib->cq_memlinks,
+				cmd_destroy_cq->cq_handle);
+		BUG_ON(qml == NULL);
+		virtib_put_pages(qml->buf_ml);
+		virtib_put_pages(qml->db_ml);
+		kfree(qml);
+	} else if (hdr->command == IB_USER_VERBS_CMD_DESTROY_QP){
+		qml = radix_tree_delete(&vib->qp_memlinks,
+				cmd_destroy_qp->qp_handle);
+		BUG_ON(qml == NULL);
+		virtib_put_pages(qml->buf_ml);
+		virtib_put_pages(qml->db_ml);
+		kfree(qml);
+	} else if (hdr->command == IB_USER_VERBS_CMD_DESTROY_SRQ){
+		qml = radix_tree_delete(&vib->srq_memlinks,
+				cmd_destroy_srq->srq_handle);
+		BUG_ON(qml == NULL);
+		virtib_put_pages(qml->buf_ml);
+		virtib_put_pages(qml->db_ml);
+		kfree(qml);
+	} else if (hdr->command == IB_USER_VERBS_CMD_DEREG_MR){
+		mrml = radix_tree_delete(&vib->mr_memlinks,
+				cmd_dereg_mr->mr_handle);
+		BUG_ON(mrml == NULL);
+		virtib_put_pages(mrml->ml);
+		kfree(mrml);
+	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_CQ){
+		BUG_ON(radix_tree_insert(&vib->cq_memlinks,
+					cmd_create_cq_resp->cq_handle,
+					ml) != 0);
+	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_QP){
+		BUG_ON(radix_tree_insert(&vib->qp_memlinks,
+					cmd_create_qp_resp->qp_handle,
+					ml) != 0);
+	} else if (hdr->command == IB_USER_VERBS_CMD_CREATE_SRQ){
+		BUG_ON(radix_tree_insert(&vib->srq_memlinks,
+					cmd_create_srq_resp->srq_handle,
+					ml) != 0);
+	} else if (hdr->command == IB_USER_VERBS_CMD_REG_MR){
+		BUG_ON(radix_tree_insert(&vib->mr_memlinks,
+					cmd_reg_mr->mr_handle,
+					ml) != 0);
+	} else if (hdr->command == IB_USER_VERBS_CMD_RESIZE_CQ){
+		qml = radix_tree_lookup(&vib->mr_memlinks,
+				cmd_resize_cq->cq_handle);
+		BUG_ON(qml == NULL);
+		virtib_put_pages(qml->buf_ml);
+		qml->buf_ml = qml_resize->buf_ml;
+		kfree(qml_resize);
+	}
+}
+
 static ssize_t virtib_write(struct file *filp, const char __user *buf,
 		size_t len, loff_t *f_pos)
 {
-	struct virtio_ib_file *file = filp->private_data;
-	struct virtio_ib *vib = file->vib;
-	struct virtib_hdr_with_resp *hdr = (void *) file->in_buf;
+	struct virtio_ib_file *file;
+	struct virtio_ib *vib;
+	struct virtib_hdr_with_resp *hdr;
 	struct scatterlist sg[4];
 	int ret = 0;
+	void * ml;
 
 	spin_lock(&vib_dev->write_lock);
+	file = filp->private_data;
+	vib = file->vib;
+	hdr = (void *) file->in_buf;
+
 	if (copy_from_user(file->in_buf, buf, len)) {
 		ret = -EFAULT;
 		goto unlock;
@@ -425,14 +678,24 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf,
 		goto unlock;
 	}
 
-	virtib_replace_guest_fd_to_host_fd((void *) file->in_buf);
+	virtib_replace_guest_fd_to_host_fd(hdr);
+
+	if (hdr->command == IB_USER_VERBS_CMD_CREATE_CQ  ||
+	    hdr->command == IB_USER_VERBS_CMD_RESIZE_CQ  ||
+	    hdr->command == IB_USER_VERBS_CMD_CREATE_SRQ ||
+	    hdr->command == IB_USER_VERBS_CMD_CREATE_QP){
+		/* do not pass buf_size onto infiniband driver */
+		len -= sizeof(__u64);
+	}
 
 	sg_init_one(&sg[0], &file->host_fd, sizeof(file->host_fd));
 	sg_init_one(&sg[1], file->in_buf, len);
-	sg_init_one(&sg[2], &ret, sizeof(int));
-	sg_init_one(&sg[3], file->out_buf, sizeof(file->out_buf));
+	sg_init_one(&sg[4], &ret, sizeof(int));
+	sg_init_one(&sg[5], file->out_buf, sizeof(file->out_buf));
 
-	if(virtqueue_add_buf(vib->write_vq, sg, 2, 2, file) < 0) {
+	ml = virtib_memlink_before_send(hdr, &sg[2]);
+
+	if(virtqueue_add_buf(vib->write_vq, sg, 4, 2, file) < 0) {
 		printk(KERN_ERR "virtio-ib: virtib_write add_buf error\n");
 		ret = -EFAULT;
 		goto unlock;
@@ -440,6 +703,8 @@ static ssize_t virtib_write(struct file *filp, const char __user *buf,
 
 	virtqueue_kick(vib->write_vq);
 	wait_for_completion(&file->write_acked);
+
+	virtib_memlink_after_send(vib, hdr, file->out_buf, ml);
 
 	if (hdr->command == IB_USER_VERBS_CMD_CREATE_COMP_CHANNEL){
 		struct ib_uverbs_create_comp_channel_resp *__resp =
@@ -564,7 +829,7 @@ static int init_vq(struct virtio_ib *vib)
 {
 	struct virtqueue *vqs[4];
 	vq_callback_t *callbacks[] = {virtib_write_cb, virtib_read_cb,
-				      virtib_device_cb, virtib_event_cb};
+			virtib_device_cb, virtib_event_cb};
 	const char *names[] = { "write", "read", "device", "event"};
 	int err = 0;
 
@@ -609,6 +874,10 @@ static int virtib_probe(struct virtio_device *vdev)
 	}
 
 	spin_lock_init(&vib->write_lock);
+	INIT_RADIX_TREE(&vib->cq_memlinks, GFP_ATOMIC);
+	INIT_RADIX_TREE(&vib->qp_memlinks, GFP_ATOMIC);
+	INIT_RADIX_TREE(&vib->srq_memlinks, GFP_ATOMIC);
+	INIT_RADIX_TREE(&vib->mr_memlinks, GFP_ATOMIC);
 
 	return 0;
 

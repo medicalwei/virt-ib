@@ -37,7 +37,6 @@
 #include <pthread.h>
 
 #include <infiniband/driver.h>
-#include "virtio_memlink.h"
 
 #ifdef HAVE_VALGRIND_MEMCHECK_H
 

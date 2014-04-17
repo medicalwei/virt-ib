@@ -48,43 +48,6 @@
 
 #include "ibverbs.h"
 
-#define MEMLINK_DEVICE_PATH "/dev/memlink" 
-
-void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink)
-{
-	struct virtio_memlink_ioctl_input memlink_input;
-	int fd;
-
-	mlock(ptr, size);
-
-	fd = open(MEMLINK_DEVICE_PATH, O_RDWR);
-	if (fd < 0){
-		return NULL;
-	}
-
-	memlink_input.gva = (long unsigned int) ptr;
-        memlink_input.size = size;
-
-	if (ioctl(fd, MEMLINK_IOC_CREATE, &memlink_input) < 0) {
-		return NULL;
-	}
-
-	mlink->fd  = fd;
-	mlink->hva = memlink_input.hva;
-
-	return (void*) mlink->hva;
-}
-
-void vib_cmd_return_memory(struct vib_mlink *mlink)
-{
-	if (ioctl(mlink->fd, MEMLINK_IOC_REVOKE, mlink->hva) < 0) {
-		printf("[vib_return_memory] return memory failed\n");
-	}
-	close(mlink->fd);
-	mlink->fd  = -1;
-	mlink->hva = 0;
-}
-
 static int ibv_cmd_get_context_v2(struct ibv_context *context,
 				  struct ibv_get_context *new_cmd,
 				  size_t new_cmd_size,
@@ -279,9 +242,10 @@ int ibv_cmd_reg_mr(struct ibv_pd *pd, void *addr, size_t length,
 		   size_t cmd_size,
 		   struct ibv_reg_mr_resp *resp, size_t resp_size)
 {
+
 	IBV_INIT_CMD_RESP(cmd, cmd_size, REG_MR, resp, resp_size);
 
-	cmd->start 	  = (uintptr_t) vib_cmd_reassemble_memory(addr, length, &mr->mlink);
+	cmd->start 	  = (uintptr_t) addr;
 	cmd->length 	  = length;
 	cmd->hca_va 	  = hca_va;
 	cmd->pd_handle 	  = pd->handle;
@@ -309,8 +273,6 @@ int ibv_cmd_dereg_mr(struct ibv_mr *mr)
 
 	if (write(mr->context->cmd_fd, &cmd, sizeof cmd) != sizeof cmd)
 		return errno;
-
-	vib_cmd_return_memory(&mr->mlink);
 
 	return 0;
 }

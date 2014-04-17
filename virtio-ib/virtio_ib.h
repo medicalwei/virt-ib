@@ -33,12 +33,14 @@ struct virtib_create_cq {
 	struct ib_uverbs_create_cq	cmd;
 	__u64				buf_addr;
 	__u64				db_addr;
+	__u64                           buf_size;
 };
 
 struct virtib_resize_cq {
 	struct ib_uverbs_cmd_hdr	hdr;
 	struct ib_uverbs_resize_cq	cmd;
 	__u64				buf_addr;
+	__u64                           buf_size;
 };
 
 struct virtib_create_srq {
@@ -46,6 +48,7 @@ struct virtib_create_srq {
 	struct ib_uverbs_create_srq	cmd;
 	__u64				buf_addr;
 	__u64				db_addr;
+	__u64                           buf_size;
 };
 
 struct virtib_create_qp {
@@ -57,6 +60,7 @@ struct virtib_create_qp {
 	__u8				log_sq_stride;
 	__u8				sq_no_prefetch;	/* was reserved in ABI 2 */
 	__u8				reserved[5];
+	__u64                           buf_size;
 };
 
 struct virtib_create_ah {

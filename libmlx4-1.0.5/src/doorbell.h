@@ -60,6 +60,4 @@ static inline void mlx4_write64(uint32_t val[2], struct mlx4_context *ctx, int o
 
 #endif
 
-uint32_t *vib_get_host_db_addr(struct mlx4_context *context, enum mlx4_db_type type, uint32_t *db);
-
 #endif /* DOORBELL_H */

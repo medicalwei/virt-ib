@@ -57,11 +57,6 @@
 
 BEGIN_C_DECLS
 
-struct vib_mlink{
-	int fd;
-	unsigned long long hva;	
-};
-
 union ibv_gid {
 	uint8_t			raw[16];
 	struct {
@@ -320,7 +315,6 @@ struct ibv_mr {
 	uint32_t		handle;
 	uint32_t		lkey;
 	uint32_t		rkey;
-	struct vib_mlink	mlink;
 };
 
 enum ibv_mw_type {
@@ -571,8 +565,6 @@ struct ibv_srq {
 	pthread_mutex_t		mutex;
 	pthread_cond_t		cond;
 	uint32_t		events_completed;
-
-	struct vib_mlink	mlink;
 };
 
 struct ibv_qp {
@@ -590,8 +582,6 @@ struct ibv_qp {
 	pthread_mutex_t		mutex;
 	pthread_cond_t		cond;
 	uint32_t		events_completed;
-
-	struct vib_mlink	mlink;
 };
 
 struct ibv_comp_channel {
@@ -611,8 +601,6 @@ struct ibv_cq {
 	pthread_cond_t		cond;
 	uint32_t		comp_events_completed;
 	uint32_t		async_events_completed;
-
-	struct vib_mlink	mlink;
 };
 
 struct ibv_ah {
@@ -1129,16 +1117,6 @@ const char *ibv_port_state_str(enum ibv_port_state port_state);
  * ibv_event_type_str - Return string describing event_type enum value
  */
 const char *ibv_event_type_str(enum ibv_event_type event);
-
-/**
- * vib_cmd_reassemble_memory - Link memory to host
- */
-void* vib_cmd_reassemble_memory(void* ptr, int size, struct vib_mlink *mlink);
-
-/**
- * vib_cmd_return_memory - Release memlink and restore paging
- */
-void vib_cmd_return_memory(struct vib_mlink *mlink);
 
 END_C_DECLS
 
