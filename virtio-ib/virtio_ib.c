@@ -434,11 +434,15 @@ static struct virtio_ib_memlink *virtib_get_pages(
 	unsigned int num_pfns;
 
 	start_addr = addr & PAGE_MASK;
-	end_addr = PAGE_ALIGN(addr + size);
-	num_pfns = (end_addr - start_addr) >> PAGE_SHIFT;
+	if (size == 0) {
+		num_pfns = 1;
+	} else {
+		end_addr = PAGE_ALIGN(addr + size);
+		num_pfns = (end_addr - start_addr) >> PAGE_SHIFT;
+	}
 
 	if (!access_ok(VERIFY_WRITE, start_addr, num_pfns)) {
-		printk(KERN_ERR "virtmemlink: not a valid address\n");
+		printk(KERN_ERR "virtio_ib: virtib_get_pages: not a valid address\n");
 		err = -EFAULT;
 		goto reterr;
 	}
@@ -519,8 +523,7 @@ static int virtib_memlink_before_send(
 				GFP_KERNEL);
 		qml->buf_ml = virtib_get_pages(cmd_create_cq->buf_addr,
 				 cmd_create_cq->buf_size);
-		qml->db_ml  = virtib_get_pages(cmd_create_cq->db_addr,
-				 PAGE_SIZE);
+		qml->db_ml  = virtib_get_pages(cmd_create_cq->db_addr, 0);
 		sg_init_one(&sg[0], qml->buf_ml->pfns,
 				qml->buf_ml->sizeof_pfns);
 		sg_init_one(&sg[1], qml->db_ml->pfns,
@@ -537,7 +540,7 @@ static int virtib_memlink_before_send(
 				qml->buf_ml->sizeof_pfns);
 		if (cmd_create_qp->db_addr != 0) {
 			qml->db_ml = virtib_get_pages(cmd_create_qp->db_addr,
-					PAGE_SIZE);
+					0);
 			sg_init_one(&sg[1], qml->db_ml->pfns,
 					qml->db_ml->sizeof_pfns);
 			ret = 2;
@@ -551,8 +554,7 @@ static int virtib_memlink_before_send(
 				GFP_KERNEL);
 		qml->buf_ml = virtib_get_pages(cmd_create_srq->buf_addr,
 			         cmd_create_srq->buf_size);
-		qml->db_ml  = virtib_get_pages(cmd_create_srq->db_addr,
-				 PAGE_SIZE);
+		qml->db_ml  = virtib_get_pages(cmd_create_srq->db_addr, 0);
 		sg_init_one(&sg[0], qml->buf_ml->pfns,
 				qml->buf_ml->sizeof_pfns);
 		sg_init_one(&sg[1], qml->db_ml->pfns,
