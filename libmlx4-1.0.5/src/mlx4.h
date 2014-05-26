@@ -309,7 +309,7 @@ static inline struct mlx4_ah *to_mah(struct ibv_ah *ibah)
 	return to_mxxx(ah, ah);
 }
 
-int mlx4_alloc_buf(struct mlx4_buf *buf, size_t size, int page_size);
+int vib_alloc_buf(struct mlx4_context *ctx, struct mlx4_buf *buf, size_t size, int page_size);
 void mlx4_free_buf(struct mlx4_buf *buf);
 
 uint32_t *mlx4_alloc_db(struct mlx4_context *context, enum mlx4_db_type type);
@@ -330,8 +330,8 @@ int mlx4_dereg_mr(struct ibv_mr *mr);
 struct ibv_cq *mlx4_create_cq(struct ibv_context *context, int cqe,
 			       struct ibv_comp_channel *channel,
 			       int comp_vector);
-int mlx4_alloc_cq_buf(struct mlx4_device *dev, struct mlx4_buf *buf, int nent,
-		      int entry_size);
+int vib_alloc_cq_buf(struct mlx4_context *ctx, struct mlx4_device *dev,
+		     struct mlx4_buf *buf, int nent, int entry_size);
 int mlx4_resize_cq(struct ibv_cq *cq, int cqe);
 int mlx4_destroy_cq(struct ibv_cq *cq);
 int mlx4_poll_cq(struct ibv_cq *cq, int ne, struct ibv_wc *wc);

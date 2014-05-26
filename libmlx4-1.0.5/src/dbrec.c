@@ -68,7 +68,7 @@ static struct mlx4_db_page *__add_page(struct mlx4_context *context,
 	if (!page)
 		return NULL;
 
-	if (mlx4_alloc_buf(&page->buf, ps, ps)) {
+	if (vib_alloc_buf(context, &page->buf, ps, ps)) {
 		free(page);
 		return NULL;
 	}

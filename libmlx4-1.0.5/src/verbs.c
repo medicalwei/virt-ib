@@ -185,7 +185,7 @@ struct ibv_cq *mlx4_create_cq(struct ibv_context *context, int cqe,
 
 	cqe = align_queue_size(cqe + 1);
 
-	if (mlx4_alloc_cq_buf(to_mdev(context->device), &cq->buf, cqe, mctx->cqe_size))
+	if (vib_alloc_cq_buf(mctx, to_mdev(context->device), &cq->buf, cqe, mctx->cqe_size))
 		goto err;
 
 	cq->cqe_size = mctx->cqe_size;
@@ -250,7 +250,7 @@ int mlx4_resize_cq(struct ibv_cq *ibcq, int cqe)
 		goto out;
 	}
 
-	ret = mlx4_alloc_cq_buf(to_mdev(ibcq->context->device), &buf, cqe, cq->cqe_size);
+	ret = vib_alloc_cq_buf(to_mctx(ibcq->context), to_mdev(ibcq->context->device), &buf, cqe, cq->cqe_size);
 	if (ret)
 		goto out;
 

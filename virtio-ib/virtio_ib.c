@@ -347,6 +347,9 @@ static void virtib_device_mmap(struct vm_area_struct *vma)
 	struct scatterlist sg[6];
 	__s32 cmd = VIRTIB_DEVICE_MMAP;
 
+	if (priv->offset & 0x100000)
+		return;
+
 	sg_init_one(&sg[0], &cmd, sizeof(cmd));
 	sg_init_one(&sg[1], &file->host_fd, sizeof(file->host_fd));
 	sg_init_one(&sg[2], &priv->offset, sizeof(priv->offset));
@@ -368,6 +371,9 @@ static void virtib_device_munmap(struct vm_area_struct *vma)
 	struct scatterlist sg[3];
 	__s32 cmd = VIRTIB_DEVICE_MUNMAP;
 
+	if (priv->offset & 0x100000)
+		goto free_pages;
+
 	sg_init_one(&sg[0], &cmd, sizeof(cmd));
 	sg_init_one(&sg[1], &priv->page, sizeof(priv->page));
 	sg_init_one(&sg[2], &priv->size, sizeof(priv->size));
@@ -377,6 +383,7 @@ static void virtib_device_munmap(struct vm_area_struct *vma)
 	virtqueue_kick(vib->device_vq);
 	wait_for_completion(&file->device_acked);
 
+free_pages:
 	free_pages((unsigned long) __va(priv->page), get_order(priv->size));
 	kfree(priv);
 }

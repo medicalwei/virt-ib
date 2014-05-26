@@ -59,13 +59,19 @@ static int ibv_dofork_range(void *base, size_t size)
 
 #endif /* HAVE_IBV_DONTFORK_RANGE && HAVE_IBV_DOFORK_RANGE */
 
-int mlx4_alloc_buf(struct mlx4_buf *buf, size_t size, int page_size)
+int vib_alloc_buf(struct mlx4_context *ctx, struct mlx4_buf *buf, size_t size, int page_size)
 {
 	int ret;
+	int cmd_fd = ctx->ibv_ctx.cmd_fd;
 
 	buf->length = align(size, page_size);
-	buf->buf = mmap(NULL, buf->length, PROT_READ | PROT_WRITE,
-			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (size > page_size){
+		buf->buf = mmap(NULL, buf->length, PROT_READ | PROT_WRITE,
+				MAP_PRIVATE, cmd_fd, 0x100000);
+	} else {
+		buf->buf = mmap(NULL, buf->length, PROT_READ | PROT_WRITE,
+				MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	}
 	if (buf->buf == MAP_FAILED)
 		return errno;
 

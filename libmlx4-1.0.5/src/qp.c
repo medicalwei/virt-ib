@@ -615,7 +615,7 @@ int mlx4_alloc_qp_buf(struct ibv_pd *pd, struct ibv_qp_cap *cap,
 		qp->sq.offset = 0;
 	}
 
-	if (mlx4_alloc_buf(&qp->buf,
+	if (vib_alloc_buf(to_mctx(pd->context), &qp->buf,
 			    align(qp->buf_size, to_mdev(pd->context->device)->page_size),
 			    to_mdev(pd->context->device)->page_size)) {
 		free(qp->sq.wrid);

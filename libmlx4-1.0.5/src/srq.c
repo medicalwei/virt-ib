@@ -145,7 +145,7 @@ int mlx4_alloc_srq_buf(struct ibv_pd *pd, struct ibv_srq_attr *attr,
 
 	buf_size = srq->max << srq->wqe_shift;
 
-	if (mlx4_alloc_buf(&srq->buf, buf_size,
+	if (vib_alloc_buf(to_mctx(pd->context), &srq->buf, buf_size,
 			   to_mdev(pd->context->device)->page_size)) {
 		free(srq->wrid);
 		return -1;
