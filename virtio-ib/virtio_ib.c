@@ -19,6 +19,7 @@
 #include <linux/spinlock.h>
 #include <linux/radix-tree.h>
 #include <rdma/ib_user_verbs.h>
+#include <rdma/ib_umem.h>
 
 #define IB_UVERBS_CMD_MAX_SIZE 16384
 
@@ -72,7 +73,9 @@ struct virtio_ib_event_file{
 struct virtio_ib_mmap_struct{
 	struct virtio_ib_file    *file;
 	unsigned long             page;
+	unsigned long             size;
 	__u32                     offset;
+	__s32                     flags;
 };
 
 struct virtio_ib_queue_memlink{
@@ -341,15 +344,17 @@ static void virtib_device_mmap(struct vm_area_struct *vma)
 	struct virtio_ib_mmap_struct *priv = vma->vm_private_data;
 	struct virtio_ib_file *file = priv->file;
 	struct virtio_ib *vib = file->vib;
-	struct scatterlist sg[4];
+	struct scatterlist sg[6];
 	__s32 cmd = VIRTIB_DEVICE_MMAP;
 
 	sg_init_one(&sg[0], &cmd, sizeof(cmd));
 	sg_init_one(&sg[1], &file->host_fd, sizeof(file->host_fd));
 	sg_init_one(&sg[2], &priv->offset, sizeof(priv->offset));
 	sg_init_one(&sg[3], &priv->page, sizeof(priv->page));
+	sg_init_one(&sg[4], &priv->size, sizeof(priv->size));
+	sg_init_one(&sg[5], &priv->flags, sizeof(priv->flags));
 
-	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 4, 0, file) < 0);
+	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 6, 0, file) < 0);
 
 	virtqueue_kick(vib->device_vq);
 	wait_for_completion(&file->device_acked);
@@ -360,18 +365,19 @@ static void virtib_device_munmap(struct vm_area_struct *vma)
 	struct virtio_ib_mmap_struct *priv = vma->vm_private_data;
 	struct virtio_ib_file *file = priv->file;
 	struct virtio_ib *vib = file->vib;
-	struct scatterlist sg[2];
+	struct scatterlist sg[3];
 	__s32 cmd = VIRTIB_DEVICE_MUNMAP;
 
 	sg_init_one(&sg[0], &cmd, sizeof(cmd));
 	sg_init_one(&sg[1], &priv->page, sizeof(priv->page));
+	sg_init_one(&sg[2], &priv->size, sizeof(priv->size));
 
-	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 2, 0, file) < 0);
+	BUG_ON(virtqueue_add_buf(vib->device_vq, sg, 3, 0, file) < 0);
 
 	virtqueue_kick(vib->device_vq);
 	wait_for_completion(&file->device_acked);
 
-	free_page((unsigned long) __va(priv->page));
+	free_pages((unsigned long) __va(priv->page), get_order(priv->size));
 	kfree(priv);
 }
 
@@ -384,13 +390,21 @@ static int virtib_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	struct virtio_ib_mmap_struct *priv =
 		kmalloc(sizeof(struct virtio_ib_mmap_struct), GFP_KERNEL);
-	unsigned long page = __get_free_page(GFP_KERNEL);
+	unsigned long page;
+	unsigned int order;
+
+	/* TODO: use dma-mappings.h */
+
+	order = get_order(vma->vm_end - vma->vm_start);
+	page = __get_free_pages(GFP_KERNEL, order);
 
 	vma->vm_private_data = (void *) priv;
 
 	priv->file = filp->private_data;
 	priv->page = __pa(page);
+	priv->size = PAGE_SIZE << order;
 	priv->offset = vma->vm_pgoff << PAGE_SHIFT;
+	priv->flags = vma->vm_flags;
 	vma->vm_pgoff = __pa(page) >> PAGE_SHIFT;
 
 	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
@@ -432,6 +446,9 @@ static struct virtio_ib_memlink *virtib_get_pages(
 	struct virtio_ib_memlink *ml;
 	unsigned long start_addr, end_addr;
 	unsigned int num_pfns;
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
+	unsigned long pfn64;
 
 	start_addr = addr & PAGE_MASK;
 	if (size == 0) {
@@ -439,12 +456,6 @@ static struct virtio_ib_memlink *virtib_get_pages(
 	} else {
 		end_addr = PAGE_ALIGN(addr + size);
 		num_pfns = (end_addr - start_addr) >> PAGE_SHIFT;
-	}
-
-	if (!access_ok(VERIFY_WRITE, start_addr, num_pfns)) {
-		printk(KERN_ERR "virtio_ib: virtib_get_pages: not a valid address\n");
-		err = -EFAULT;
-		goto reterr;
 	}
 
 	ml = kmalloc(sizeof(struct virtio_ib_memlink), GFP_KERNEL);
@@ -456,6 +467,10 @@ static struct virtio_ib_memlink *virtib_get_pages(
 	ml->num_pfns = num_pfns;
 	ml->sizeof_pfns = sizeof(*ml->pfns)*num_pfns;
 
+	if (!access_ok(VERIFY_WRITE, start_addr, num_pfns)) {
+		goto try_follow_pfn;
+	}
+
 	ml->pages = kmalloc(sizeof(*ml->pages) * num_pfns, GFP_KERNEL);
 	if (ml->pages == NULL) {
 		err = -ENOMEM;
@@ -464,8 +479,10 @@ static struct virtio_ib_memlink *virtib_get_pages(
 
 	err = get_user_pages_fast(start_addr, num_pfns, 1, ml->pages);
 
-	if (err <= 0)
-		goto free_pages;
+	if (err <= 0) {
+		kfree(ml->pages);
+		goto try_follow_pfn;
+	}
 
 	ml->pfns = (uint32_t *) kmalloc(ml->sizeof_pfns, GFP_KERNEL);
 	if (ml->pfns == NULL) {
@@ -473,11 +490,33 @@ static struct virtio_ib_memlink *virtib_get_pages(
 		goto free_pages;
 	}
 
-	for (i=0; i<num_pfns; i++) {
+	for (i=0; i<num_pfns; i++)
 		ml->pfns[i] = (uint32_t) page_to_pfn(ml->pages[i]);
-	}
 
 	return ml;
+
+try_follow_pfn:
+	ml->pages = NULL;
+	down_read(&mm->mmap_sem);
+	vma = find_vma(mm, start_addr);
+	if (!vma) {
+		err = -EFAULT;
+		goto free_ml;
+	}
+
+	ml->pfns = (uint32_t *) kmalloc(ml->sizeof_pfns, GFP_KERNEL);
+	for (i=0; i<num_pfns; i++) {
+		err = follow_pfn(vma, start_addr + PAGE_SIZE*i, &pfn64);
+		ml->pfns[i] = (uint32_t) pfn64;
+		if (err < 0) {
+			kfree(ml->pfns);
+			err = -EFAULT;
+			goto free_ml;
+		}
+	}
+	up_read(&mm->mmap_sem);
+	return ml;
+
 
 free_pages:
 	kfree(ml->pages);
@@ -494,8 +533,10 @@ static void virtib_put_pages(struct virtio_ib_memlink *ml)
 	if (ml == NULL)
 		return;
 
-	for(i=0; i<ml->num_pfns; i++){
-		put_page(ml->pages[i]);
+	if (ml->pages != NULL) {
+		for(i=0; i<ml->num_pfns; i++){
+			put_page(ml->pages[i]);
+		}
 	}
 
 	/* free memory */
