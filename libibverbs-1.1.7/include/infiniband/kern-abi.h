@@ -879,4 +879,18 @@ struct ibv_create_srq_resp_v5 {
 	__u32 srq_handle;
 };
 
+/*virtib structure*/
+
+enum{
+	IB_USER_VERBS_CMD_FIND_SYSFS = 1000,
+	IB_USER_VERBS_CMD_OPEN,
+	IB_USER_VERBS_CMD_CLOSE,
+};
+
+enum{
+	IB_USER_VERBS_CMD_FIND_SYSFS_V2 = 1000,
+	IB_USER_VERBS_CMD_OPEN_V2,
+	IB_USER_VERBS_CMD_CLOSE_V2,
+};
+
 #endif /* KERN_ABI_H */

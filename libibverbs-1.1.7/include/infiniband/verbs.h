@@ -53,6 +53,8 @@
 #  define __attribute_const
 #endif
 
+#define uverbs0 "/dev/virtib"
+
 BEGIN_C_DECLS
 
 union ibv_gid {
