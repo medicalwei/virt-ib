@@ -67,7 +67,7 @@ int vib_alloc_buf(struct mlx4_context *ctx, struct mlx4_buf *buf, size_t size, i
 	buf->length = align(size, page_size);
 	if (size > page_size){
 		buf->buf = mmap(NULL, buf->length, PROT_READ | PROT_WRITE,
-				MAP_PRIVATE, cmd_fd, 0x100000);
+				MAP_SHARED, cmd_fd, 0x100000);
 	} else {
 		buf->buf = mmap(NULL, buf->length, PROT_READ | PROT_WRITE,
 				MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
