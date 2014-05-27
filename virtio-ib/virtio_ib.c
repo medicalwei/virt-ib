@@ -417,7 +417,7 @@ static int virtib_mmap(struct file *filp, struct vm_area_struct *vma)
 	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
 				vma->vm_end - vma->vm_start,
 				vma->vm_page_prot)) {
-		free_page(page);
+		free_pages(page, order);
 		kfree(priv);
 		return -EAGAIN;
 	}
@@ -508,6 +508,7 @@ try_follow_pfn:
 	vma = find_vma(mm, start_addr);
 	if (!vma) {
 		err = -EFAULT;
+		up_read(&mm->mmap_sem);
 		goto free_ml;
 	}
 
@@ -518,6 +519,7 @@ try_follow_pfn:
 		if (err < 0) {
 			kfree(ml->pfns);
 			err = -EFAULT;
+			up_read(&mm->mmap_sem);
 			goto free_ml;
 		}
 	}
