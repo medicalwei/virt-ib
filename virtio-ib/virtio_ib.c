@@ -247,6 +247,7 @@ static int virtib_open(struct inode *inode, struct file *filp)
 	struct scatterlist sg[2];
 	__s32 cmd = VIRTIB_DEVICE_OPEN;
 
+	spin_lock(&vib_dev->write_lock);
 	try_module_get(THIS_MODULE);
 
 	file = kmalloc(sizeof(struct virtio_ib_file), GFP_KERNEL);
@@ -266,6 +267,7 @@ static int virtib_open(struct inode *inode, struct file *filp)
 	INIT_RADIX_TREE(&file->mr_memlinks, GFP_ATOMIC);
 
 	if(virtqueue_add_buf(vib->device_vq, sg, 1, 1, file) < 0) {
+		spin_unlock(&vib_dev->write_lock);
 		printk(KERN_ERR "virtio-ib: virtib_open add_buf error\n");
 		return -EFAULT;
 	}
@@ -276,6 +278,7 @@ static int virtib_open(struct inode *inode, struct file *filp)
 	if ((int) file->host_fd == -1){
 		printk(KERN_ERR "virtio-ib: virtib_open close error\n");
 	}
+	spin_unlock(&vib_dev->write_lock);
 
 	return 0;
 }
@@ -287,6 +290,8 @@ static int virtib_release(struct inode *inode, struct file *filp)
 	struct scatterlist sg[3];
 	__s32 cmd = VIRTIB_DEVICE_CLOSE;
 	__s32 ret;
+
+	spin_lock(&vib_dev->write_lock);
 
 	sg_init_one(&sg[0], &cmd, sizeof(cmd));
 	sg_init_one(&sg[1], &file->host_fd, sizeof(file->host_fd));
@@ -306,6 +311,8 @@ static int virtib_release(struct inode *inode, struct file *filp)
 	kfree(file);
 
 	module_put(THIS_MODULE);
+
+	spin_unlock(&vib_dev->write_lock);
 
 	return 0;
 }
@@ -350,6 +357,7 @@ static void virtib_device_mmap(struct vm_area_struct *vma)
 	if (priv->offset & 0x100000)
 		return;
 
+	spin_lock(&vib_dev->write_lock);
 	sg_init_one(&sg[0], &cmd, sizeof(cmd));
 	sg_init_one(&sg[1], &file->host_fd, sizeof(file->host_fd));
 	sg_init_one(&sg[2], &priv->offset, sizeof(priv->offset));
@@ -361,6 +369,7 @@ static void virtib_device_mmap(struct vm_area_struct *vma)
 
 	virtqueue_kick(vib->device_vq);
 	wait_for_completion(&file->device_acked);
+	spin_unlock(&vib_dev->write_lock);
 }
 
 static void virtib_device_munmap(struct vm_area_struct *vma)
@@ -374,6 +383,7 @@ static void virtib_device_munmap(struct vm_area_struct *vma)
 	if (priv->offset & 0x100000)
 		goto free_pages;
 
+	spin_lock(&vib_dev->write_lock);
 	sg_init_one(&sg[0], &cmd, sizeof(cmd));
 	sg_init_one(&sg[1], &priv->page, sizeof(priv->page));
 	sg_init_one(&sg[2], &priv->size, sizeof(priv->size));
@@ -386,6 +396,7 @@ static void virtib_device_munmap(struct vm_area_struct *vma)
 free_pages:
 	free_pages((unsigned long) __va(priv->page), get_order(priv->size));
 	kfree(priv);
+	spin_unlock(&vib_dev->write_lock);
 }
 
 static struct vm_operations_struct virtib_mmap_vm_ops = {
@@ -802,6 +813,8 @@ static ssize_t virtib_read(struct file *filp, char __user *ubuf,
 	char *file_buffer = kmalloc(sizeof(char) * 1024, GFP_KERNEL);
 	ssize_t retsize;
 
+	spin_lock(&vib_dev->write_lock);
+
 	if (copy_from_user(path_buffer, ubuf, sizeof(char)*1024)){
 		printk(KERN_ERR "virtio-ib: copy from user failed\n");
 		goto out;
@@ -822,6 +835,7 @@ static ssize_t virtib_read(struct file *filp, char __user *ubuf,
 out:
 	kfree(path_buffer);
 	kfree(file_buffer);
+	spin_unlock(&vib_dev->write_lock);
 	return retsize;
 }
 
